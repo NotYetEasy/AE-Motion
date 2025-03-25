@@ -15,6 +15,6 @@ We would really appreciate contributers as we are mere newbies! Contributing wil
 
 <details>
 <summary><h2>Main Contributers:</h2></summary>
-* DKT: Coding almost everything with AI.
-* Unknown1234: Assisting him with understand code.
+<br>* DKT: Coding almost everything with AI.
+<br>* Unknown1234: Assisting him with understand code.
 </details>
