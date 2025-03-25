@@ -33,5 +33,5 @@ We would really appreciate contributers as we are mere newbies! Contributing wil
 <details>
 <summary><h2>Main Contributers:</h2></summary>
 <br>* DKT: Coding almost everything with AI.
-<br>* Unknown1234: Assisting him with understand code.
+<br>* Unknown1234: Assisting him with understand code. Making the Github Repo.
 </details>
