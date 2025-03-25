@@ -9,5 +9,5 @@ Our [Discord](https://discord.com/) Server for reference:
 We would really appreciate contributers as we are mere newbies! Contributing will greatly help with speeding up the process of development. You can help by sending a pull request with the changes mentions.
 
 >## Main Contributers:
->DKT: Coding almost everything with AI.
->Unknown1234: Assisting him with understanding code.
+1. DKT: Coding almost everything with AI.  
+2. Unknown1234: Assisting him with understanding code.
