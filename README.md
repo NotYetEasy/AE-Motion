@@ -5,7 +5,9 @@
 
 # Ae Motion
 
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?&logo=discord&logoColor=white)](https://discord.gg/wg6k3JCD9s)
+<a href="https://discord.gg/wg6k3JCD9s">
+  <img alt="discord-plural" height="56" src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy-minimal/social/discord-plural_vector.svg">
+</a>
 
 >## Summary:
 >### This project is made with the help of AI! We are only newbies and are still learning. Any help AI or Manual will be appreciated. To help send a pull request to the repository. This project is Open-Source and is licensed under the Apache-2.0 License. Don't forget to star the repository!
