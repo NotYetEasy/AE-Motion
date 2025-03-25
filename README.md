@@ -13,6 +13,8 @@ Our [Discord](https://discord.com/) Server for reference:
 >## Contribution:
 We would really appreciate contributers as we are mere newbies! Contributing will greatly help with speeding up the process of development. You can help by sending a pull request with the changes mentions.
 
->## Main Contributers:
-1. DKT: Coding almost everything with AI.  
-2. Unknown1234: Assisting him with understand code.
+<details>
+<summary><h2>Main Contributers:</h2></summary>
+* DKT: Coding almost everything with AI.
+* Unknown1234: Assisting him with understand code.
+</details>
