@@ -19,6 +19,12 @@
 Our [Discord](https://discord.com/) Server for reference (There is a shield at the top aswell):
 [After Effects Wis](https://discord.gg/wg6k3JCD9s)
 
+>## Installation:
+This project is currently offical Windows only unfortunately, this repository will be unable to assist any MacOS users any further. However with tinkering you might be able to get it to build and work. Steps to use the effects in After Effects:
+1. Navigate to C:\Program Files\Adobe\Common\Plug-ins (Note, even if you installed After Effects on a seperate drive this directory will remain in your C:\ Drive)
+2. Go inside the folder your After Effects version is of. For example my version says 7.0. So the directory would be: C:\Program Files\Adobe\Common\Plug-ins\7.0 for me. Your directory might depend. To find it if your confused just navigate inside the largest folder in size/the latest updated folder. You can press on the Size Button/The Date Modified Button at the top of the folder directory. From there go inside the largest folder or the newest folder. However you might also have a single folder present, in which case go inside it.
+3. Navigate inside the MediaCore folder.
+
 >## Contribution:
 We would really appreciate contributers as we are mere newbies! Contributing will greatly help with speeding up the process of development. You can help by sending a pull request with the changes mentions.
 
