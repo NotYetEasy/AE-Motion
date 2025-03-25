@@ -1,4 +1,3 @@
-https://raw.githubusercontent.com/NotYetEasy/AE-Motion/refs/heads/main/AE%20Motion.png
 <div align = center>
 
 <img src="https://raw.githubusercontent.com/NotYetEasy/AE-Motion/refs/heads/main/AE%20Motion.png" width="545" height="250" alt="banner">
