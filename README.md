@@ -28,7 +28,7 @@ This project is currently offically **Windows** only unfortunately, this reposit
 5. Open After Effects, go to the **Effects and Presets Panel** and from there locate **DKT Effects** and use them. You have succesfully finished installation.
 
 >## Contribution:
-We would really appreciate contributers as we are mere newbies! Contributing will greatly help with speeding up the process of development. You can help by sending a pull request with the changes mentions.
+We would really appreciate contributers as we are mere newbies! Contributing will greatly help with speeding up the process of development. You can help by sending a pull request with the changes mentioned.
 
 <details>
 <summary><h2>Main Contributers:</h2></summary>
