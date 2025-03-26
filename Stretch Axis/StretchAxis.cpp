@@ -72,7 +72,7 @@ ParamsSetup(
 
     AEFX_CLR_STRUCT(def);
 
-    // Scale parameter (similar to the XML's scale parameter)
+    // Scale parameter
     PF_ADD_FLOAT_SLIDERX(STR_SCALE_PARAM_NAME,
         STRETCH_SCALE_MIN,
         STRETCH_SCALE_MAX,
@@ -100,7 +100,7 @@ ParamsSetup(
 
     AEFX_CLR_STRUCT(def);
 
-    // Content Only parameter (similar to the XML's contentOnly parameter)
+    // Content Only parameter
     PF_ADD_CHECKBOX(STR_CONTENT_ONLY_PARAM_NAME,
         "",
         FALSE,
@@ -265,7 +265,7 @@ StretchFunc8(
     float x_rot = offsetX * cos_rad - offsetY * sin_rad;
     float y_rot = offsetX * sin_rad + offsetY * cos_rad;
 
-    // Apply scale (only to x-coordinate, like in the XML)
+    // Apply scale (only to x-coordinate)
     if (scale != 0.0f) {
         x_rot = x_rot / scale;
     }
@@ -343,7 +343,7 @@ StretchFunc16(
     float x_rot = offsetX * cos_rad - offsetY * sin_rad;
     float y_rot = offsetX * sin_rad + offsetY * cos_rad;
 
-    // Apply scale (only to x-coordinate, like in the XML)
+    // Apply scale (only to x-coordinate)
     if (scale != 0.0f) {
         x_rot = x_rot / scale;
     }
@@ -421,7 +421,7 @@ StretchFuncFloat(
     float x_rot = offsetX * cos_rad - offsetY * sin_rad;
     float y_rot = offsetX * sin_rad + offsetY * cos_rad;
 
-    // Apply scale (only to x-coordinate, like in the XML)
+    // Apply scale (only to x-coordinate)
     if (scale != 0.0f) {
         x_rot = x_rot / scale;
     }
@@ -797,3 +797,4 @@ EffectMain(
 
     return err;
 }
+
