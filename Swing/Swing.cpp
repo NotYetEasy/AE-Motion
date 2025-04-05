@@ -940,7 +940,7 @@ EffectMain(
         }
     }
     catch (PF_Err& thrown_err) {
-        err = thrown_err
+        err = thrown_err;
     }
     catch (const std::exception& e) {
         err = PF_Err_INTERNAL_STRUCT_DAMAGED;
