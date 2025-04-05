@@ -1,9 +1,3 @@
-#define NOMINMAX
-
-#include "Swing.h"
-#include <math.h>
-#include <fstream>
-#include <chrono>
 #include <iomanip>
 #include <string>
 #include <sstream>
@@ -78,19 +72,14 @@ GlobalSetup(
         // Set plugin flags for SmartFX
         out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE |
             PF_OutFlag_PIX_INDEPENDENT |
-            PF_OutFlag_I_EXPAND_BUFFER |
-            PF_OutFlag_SEND_UPDATE_PARAMS_UI |
-            PF_OutFlag_WIDE_TIME_INPUT |
-            PF_OutFlag_NON_PARAM_VARY |
-            PF_OutFlag_FORCE_RERENDER |
-            PF_OutFlag_I_HAVE_EXTERNAL_DEPENDENCIES;
+            PF_OutFlag_NON_PARAM_VARY;
+
 
         out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
             PF_OutFlag2_FLOAT_COLOR_AWARE |
             PF_OutFlag2_SUPPORTS_THREADED_RENDERING |
             PF_OutFlag2_REVEALS_ZERO_ALPHA |
-            PF_OutFlag2_PRESERVES_FULLY_OPAQUE_PIXELS |
-            PF_OutFlag2_AUTOMATIC_WIDE_TIME_INPUT;
+            PF_OutFlag2_I_MIX_GUID_DEPENDENCIES;
     }
     catch (...) {
         err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -185,6 +174,99 @@ ParamsSetup(
     return err;
 }
 
+static PF_Err GetLayerAnchorPoint(
+    PF_InData* in_data,
+    AEGP_LayerH layerH,
+    A_Time* current_time,
+    PF_Point* anchor_point)
+{
+    PF_Err err = PF_Err_NONE;
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+    AEGP_StreamRefH streamH = NULL;
+
+    // Get the anchor point stream, passing NULL for plugin ID
+    err = suites.StreamSuite5()->AEGP_GetNewLayerStream(
+        NULL,           // Pass NULL for plugin ID
+        layerH,
+        AEGP_LayerStream_ANCHORPOINT,
+        &streamH);
+
+    if (!err && streamH) {
+        AEGP_StreamValue2 stream_value;
+
+        // Get the stream value at current time, passing NULL for plugin ID
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+            NULL,       // Pass NULL for plugin ID
+            streamH,
+            AEGP_LTimeMode_LayerTime,
+            current_time,
+            true,       // pre-expression
+            &stream_value);
+
+        if (!err) {
+            anchor_point->x = (A_short)stream_value.val.two_d.x;
+            anchor_point->y = (A_short)stream_value.val.two_d.y;
+
+            // Dispose of the stream value
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+        }
+
+        // Dispose of the stream
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    return err;
+}
+
+// Check if there are any keyframes on the frequency parameter
+static bool HasAnyFrequencyKeyframes(PF_InData* in_data)
+{
+    PF_Err err = PF_Err_NONE;
+    bool has_keyframes = false;
+
+    AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+    // Get the effect reference
+    AEGP_EffectRefH effect_ref = NULL;
+    AEGP_StreamRefH stream_ref = NULL;
+    A_long num_keyframes = 0;
+
+    // Get the effect reference
+    if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+        AEGP_EffectRefH aegp_effect_ref = NULL;
+        err = suites.PFInterfaceSuite1()->AEGP_GetNewEffectForEffect(NULL, in_data->effect_ref, &aegp_effect_ref);
+
+        if (!err && aegp_effect_ref) {
+            // Get the stream for the frequency parameter
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL,
+                aegp_effect_ref,
+                SWING_FREQ,
+                &stream_ref);
+
+            if (!err && stream_ref) {
+                // Check how many keyframes are on this stream
+                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(stream_ref, &num_keyframes);
+
+                // If there are any keyframes, set the flag
+                if (!err && num_keyframes > 0) {
+                    has_keyframes = true;
+                }
+
+                // Dispose of the stream reference
+                suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+            }
+
+            // Dispose of the effect reference
+            suites.EffectSuite4()->AEGP_DisposeEffect(aegp_effect_ref);
+        }
+    }
+
+    return has_keyframes;
+}
+
+
+
 /**
  * Data structure for thread-local rendering information
  */
@@ -203,8 +285,7 @@ typedef struct {
 /**
  * Smart PreRender function - prepares for rendering
  */
-static PF_Err
-SmartPreRender(
+static PF_Err SmartPreRender(
     PF_InData* in_data,
     PF_OutData* out_data,
     PF_PreRenderExtra* extra)
@@ -212,73 +293,145 @@ SmartPreRender(
     PF_Err err = PF_Err_NONE;
 
     try {
-        // Initialize effect info structure
-        SwingInfo info;
-        AEFX_CLR_STRUCT(info);
+        AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-        PF_ParamDef param_copy;
-        AEFX_CLR_STRUCT(param_copy);
+        // Get all parameters for calculating max rotation
+        PF_ParamDef freq_param, angle1_param, angle2_param, phase_param, wave_param;
+        AEFX_CLR_STRUCT(freq_param);
+        AEFX_CLR_STRUCT(angle1_param);
+        AEFX_CLR_STRUCT(angle2_param);
+        AEFX_CLR_STRUCT(phase_param);
+        AEFX_CLR_STRUCT(wave_param);
 
-        // Initialize max_result_rect to the current output request rect
-        extra->output->max_result_rect = extra->input->output_request.rect;
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_FREQ, in_data->current_time, in_data->time_step, in_data->time_scale, &freq_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_ANGLE1, in_data->current_time, in_data->time_step, in_data->time_scale, &angle1_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_ANGLE2, in_data->current_time, in_data->time_step, in_data->time_scale, &angle2_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_PHASE, in_data->current_time, in_data->time_step, in_data->time_scale, &phase_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_WAVE_TYPE, in_data->current_time, in_data->time_step, in_data->time_scale, &wave_param));
 
-        // Get angle parameters to calculate maximum rotation expansion
-        err = PF_CHECKOUT_PARAM(in_data, SWING_ANGLE1, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-        if (!err) {
-            info.angle1 = param_copy.u.fs_d.value;
+        // Calculate maximum possible rotation angle
+        double max_angle = fmax(fabs(angle1_param.u.fs_d.value), fabs(angle2_param.u.fs_d.value));
+
+        // Get downsample factors
+        float downsample_x = (float)in_data->downsample_x.den / (float)in_data->downsample_x.num;
+        float downsample_y = (float)in_data->downsample_y.den / (float)in_data->downsample_y.num;
+
+        // Calculate buffer expansion based on maximum rotation and scale by downsample factor
+        A_long expansion = (A_long)((max_angle / 45.0) * 50 + 100) * (A_long)downsample_x;
+
+        // Get the original request rect
+        PF_Rect request_rect = extra->input->output_request.rect;
+
+        // Create our expanded rect accounting for pre-effect source origin
+        PF_Rect expanded_rect = request_rect;
+        expanded_rect.left = request_rect.left - expansion + in_data->pre_effect_source_origin_x;
+        expanded_rect.top = request_rect.top - expansion + in_data->pre_effect_source_origin_y;
+        expanded_rect.right = request_rect.right + expansion + in_data->pre_effect_source_origin_x;
+        expanded_rect.bottom = request_rect.bottom + expansion + in_data->pre_effect_source_origin_y;
+
+        // Get anchor point and transform
+        PF_Point anchor_point = { 0,0 };
+        A_Matrix4 transform = { 0 };
+        AEGP_LayerH layerH = NULL;
+
+        ERR(suites.LayerSuite9()->AEGP_GetActiveLayer(&layerH));
+
+        if (!err && layerH) {
+            A_Time current_time_val;
+            current_time_val.value = in_data->current_time;
+            current_time_val.scale = in_data->time_scale;
+
+            // Get layer-to-world transform
+            ERR(suites.LayerSuite9()->AEGP_GetLayerToWorldXform(layerH, &current_time_val, &transform));
+
+            // Get anchor point
+            AEGP_StreamRefH streamH = NULL;
+            ERR(suites.StreamSuite5()->AEGP_GetNewLayerStream(
+                NULL,
+                layerH,
+                AEGP_LayerStream_ANCHORPOINT,
+                &streamH));
+
+            if (!err && streamH) {
+                AEGP_StreamValue2 stream_value;
+                ERR(suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                    NULL,
+                    streamH,
+                    AEGP_LTimeMode_LayerTime,
+                    &current_time_val,
+                    true,
+                    &stream_value));
+
+                if (!err) {
+                    anchor_point.x = (A_short)stream_value.val.two_d.x;
+                    anchor_point.y = (A_short)stream_value.val.two_d.y;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
         }
-        else {
-            return err;
-        }
 
-        err = PF_CHECKOUT_PARAM(in_data, SWING_ANGLE2, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-        if (!err) {
-            info.angle2 = param_copy.u.fs_d.value;
-        }
-        else {
-            return err;
-        }
+        // Create data structure for GuidMixInPtr
+        struct {
+            double frequency;
+            double angle1;
+            double angle2;
+            double phase;
+            A_long waveType;
+            PF_Rect expanded_rect;
+            PF_Point anchor_point;
+            A_Matrix4 transform;
+            float pre_effect_source_origin_x;
+            float pre_effect_source_origin_y;
+            float downsample_x;
+            float downsample_y;
+        } mix_data;
 
-        // Calculate maximum rotation angle (absolute value)
-        double max_angle = fmax(fabs(info.angle1), fabs(info.angle2));
+        // Fill the structure
+        mix_data.frequency = freq_param.u.fs_d.value;
+        mix_data.angle1 = angle1_param.u.fs_d.value;
+        mix_data.angle2 = angle2_param.u.fs_d.value;
+        mix_data.phase = phase_param.u.fs_d.value;
+        mix_data.waveType = wave_param.u.pd.value - 1;
+        mix_data.expanded_rect = expanded_rect;
+        mix_data.anchor_point = anchor_point;
+        mix_data.transform = transform;
+        mix_data.pre_effect_source_origin_x = in_data->pre_effect_source_origin_x;
+        mix_data.pre_effect_source_origin_y = in_data->pre_effect_source_origin_y;
+        mix_data.downsample_x = downsample_x;
+        mix_data.downsample_y = downsample_y;
 
-        // Calculate buffer expansion based on maximum rotation angle - INCREASED for better coverage
-        A_long expansion = (A_long)(max_angle / 30.0) * 30 + 50;
+        // Mix in the data for caching
+        ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(mix_data), &mix_data));
 
         // Set up render request with expanded area
         PF_RenderRequest req = extra->input->output_request;
-
-        if (expansion > 0) {
-            req.rect.left -= expansion;
-            req.rect.top -= expansion;
-            req.rect.right += expansion;
-            req.rect.bottom += expansion;
-        }
+        req.rect = expanded_rect;
         req.preserve_rgb_of_zero_alpha = TRUE;
 
-        // Checkout the input layer with our expanded request
-        PF_CheckoutResult checkout;
-        err = extra->cb->checkout_layer(in_data->effect_ref,
+        // Checkout the input layer with expanded request
+        PF_CheckoutResult checkout_result;
+        ERR(extra->cb->checkout_layer(in_data->effect_ref,
             SWING_INPUT,
             SWING_INPUT,
             &req,
             in_data->current_time,
             in_data->time_step,
             in_data->time_scale,
-            &checkout);
+            &checkout_result));
 
-        if (!err) {
-            // Update max_result_rect based on checkout result
-            extra->output->max_result_rect = checkout.max_result_rect;
+        // Set our output rects
+        extra->output->max_result_rect = expanded_rect;
+        extra->output->result_rect = expanded_rect;
+        extra->output->solid = FALSE;
+        extra->output->flags |= PF_RenderOutputFlag_RETURNS_EXTRA_PIXELS;
 
-            // Set result_rect to match max_result_rect
-            extra->output->result_rect = extra->output->max_result_rect;
-
-            // Set output flags
-            extra->output->solid = FALSE;
-            extra->output->pre_render_data = NULL;
-            extra->output->flags = PF_RenderOutputFlag_RETURNS_EXTRA_PIXELS;
-        }
+        // Check in parameters
+        ERR(PF_CHECKIN_PARAM(in_data, &freq_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &angle1_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &angle2_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &phase_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &wave_param));
     }
     catch (...) {
         err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -287,9 +440,7 @@ SmartPreRender(
     return err;
 }
 
-/**
-* Smart Render function - performs the actual effect rendering
-*/
+
 static PF_Err
 SmartRender(
     PF_InData* in_data,
@@ -301,260 +452,202 @@ SmartRender(
     try {
         AEGP_SuiteHandler suites(in_data->pica_basicP);
 
+        // Get all parameters
+        PF_ParamDef freq_param, angle1_param, angle2_param, phase_param, wave_param;
+        AEFX_CLR_STRUCT(freq_param);
+        AEFX_CLR_STRUCT(angle1_param);
+        AEFX_CLR_STRUCT(angle2_param);
+        AEFX_CLR_STRUCT(phase_param);
+        AEFX_CLR_STRUCT(wave_param);
+
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_FREQ, in_data->current_time, in_data->time_step, in_data->time_scale, &freq_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_ANGLE1, in_data->current_time, in_data->time_step, in_data->time_scale, &angle1_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_ANGLE2, in_data->current_time, in_data->time_step, in_data->time_scale, &angle2_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_PHASE, in_data->current_time, in_data->time_step, in_data->time_scale, &phase_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, SWING_WAVE_TYPE, in_data->current_time, in_data->time_step, in_data->time_scale, &wave_param));
+
         // Checkout input layer pixels
         PF_EffectWorld* input_worldP = NULL;
         err = extra->cb->checkout_layer_pixels(in_data->effect_ref, SWING_INPUT, &input_worldP);
-        if (err) {
-            return err;
-        }
+        if (err) return err;
 
         // Checkout output buffer
         PF_EffectWorld* output_worldP = NULL;
         err = extra->cb->checkout_output(in_data->effect_ref, &output_worldP);
-        if (err) {
-            return err;
-        }
+        if (err) return err;
 
         if (input_worldP && output_worldP) {
-            PF_ParamDef param_copy;
-            AEFX_CLR_STRUCT(param_copy);
+            // Get pixel format
+            PF_PixelFormat pixelFormat;
+            AEGP_WorldType worldType;
 
-            // Get all effect parameters
-            // Frequency
-            double frequency = 2.0;
-            err = PF_CHECKOUT_PARAM(in_data, SWING_FREQ, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-            if (!err) {
-                frequency = param_copy.u.fs_d.value;
-            }
-            else {
-                return err;
-            }
+            PF_WorldSuite2* wsP = NULL;
+            ERR(suites.Pica()->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, (const void**)&wsP));
+            ERR(wsP->PF_GetPixelFormat(output_worldP, &pixelFormat));
+            ERR(suites.Pica()->ReleaseSuite(kPFWorldSuite, kPFWorldSuiteVersion2));
 
-            // Angle 1
-            double angle1 = -30.0;
-            err = PF_CHECKOUT_PARAM(in_data, SWING_ANGLE1, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-            if (!err) {
-                angle1 = param_copy.u.fs_d.value;
-            }
-            else {
-                return err;
+            switch (pixelFormat) {
+            case PF_PixelFormat_ARGB128:
+                worldType = AEGP_WorldType_32;
+                break;
+            case PF_PixelFormat_ARGB64:
+                worldType = AEGP_WorldType_16;
+                break;
+            case PF_PixelFormat_ARGB32:
+                worldType = AEGP_WorldType_8;
+                break;
             }
 
-            // Angle 2
-            double angle2 = 30.0;
-            err = PF_CHECKOUT_PARAM(in_data, SWING_ANGLE2, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-            if (!err) {
-                angle2 = param_copy.u.fs_d.value;
-            }
-            else {
-                return err;
-            }
-
-            // Phase
-            double phase = 0.0;
-            err = PF_CHECKOUT_PARAM(in_data, SWING_PHASE, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-            if (!err) {
-                phase = param_copy.u.fs_d.value;
-            }
-            else {
-                return err;
-            }
-
-            // Wave type
-            A_long waveType = 0;
-            err = PF_CHECKOUT_PARAM(in_data, SWING_WAVE_TYPE, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy);
-            if (!err) {
-                waveType = param_copy.u.pd.value - 1;
-            }
-            else {
-                return err;
-            }
-
-            // Convert current time to seconds
+            // Calculate animation parameters
             double current_time = (double)in_data->current_time / (double)in_data->time_scale;
+            double frequency = freq_param.u.fs_d.value;
+            double angle1 = angle1_param.u.fs_d.value;
+            double angle2 = angle2_param.u.fs_d.value;
+            double phase = phase_param.u.fs_d.value;
+            A_long waveType = wave_param.u.pd.value - 1;
 
-            // Calculate effective phase including time component
             double effective_phase = phase + (current_time * frequency);
-
-            // Calculate modulation value based on wave type (0 = Sine, 1 = Triangle)
-            double m;
-            if (waveType == 0) {
-                // Sine wave
-                m = sin(effective_phase * M_PI);
-            }
-            else {
-                // Triangle wave
-                m = TriangleWave(effective_phase / 2.0);
-            }
-
-            // Map modulation from -1...1 to 0...1
+            double m = (waveType == 0) ? sin(effective_phase * PF_PI) : TriangleWave(effective_phase / 2.0);
             double t = (m + 1.0) / 2.0;
-
-            // Calculate final angle by interpolating between angle1 and angle2
             double finalAngle = angle1 + t * (angle2 - angle1);
+            double angleRad = -finalAngle * PF_PI / 180.0;
 
-            // If the angle is very small, just do a direct copy
-            if (fabs(finalAngle) < 0.01) {
-                // Simple memcpy approach for near-zero angles
-                for (A_long y = 0; y < output_worldP->height; y++) {
-                    char* inRow = (char*)input_worldP->data + y * input_worldP->rowbytes;
-                    char* outRow = (char*)output_worldP->data + y * output_worldP->rowbytes;
+            // Get anchor point
+            PF_Point anchor_point = { 0,0 };
+            AEGP_LayerH layerH = NULL;
 
-                    // Copy entire row (works regardless of pixel format)
-                    memcpy(outRow, inRow, output_worldP->rowbytes);
+            ERR(suites.LayerSuite9()->AEGP_GetActiveLayer(&layerH));
+
+            if (!err && layerH) {
+                A_Time current_time_val;
+                current_time_val.value = in_data->current_time;
+                current_time_val.scale = in_data->time_scale;
+
+                AEGP_StreamRefH streamH = NULL;
+                ERR(suites.StreamSuite5()->AEGP_GetNewLayerStream(
+                    NULL,
+                    layerH,
+                    AEGP_LayerStream_ANCHORPOINT,
+                    &streamH));
+
+                if (!err && streamH) {
+                    AEGP_StreamValue2 stream_value;
+                    ERR(suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                        NULL,
+                        streamH,
+                        AEGP_LTimeMode_LayerTime,
+                        &current_time_val,
+                        true,
+                        &stream_value));
+
+                    if (!err) {
+                        anchor_point.x = (A_short)stream_value.val.two_d.x;
+                        anchor_point.y = (A_short)stream_value.val.two_d.y;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+                    }
+                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
             }
-            else {
-                // Convert angle to radians
-                double angleRad = finalAngle * PF_RAD_PER_DEGREE;
 
-                // Center of rotation is the center of the input world
-                PF_FpLong centerX = input_worldP->width / 2.0;
-                PF_FpLong centerY = input_worldP->height / 2.0;
+            // Calculate proper center coordinates
+            float center_x = anchor_point.x + in_data->pre_effect_source_origin_x;
+            float center_y = anchor_point.y + in_data->pre_effect_source_origin_y;
 
-                // Calculate trig values once
-                double cos_angle = cos(angleRad);
-                double sin_angle = sin(angleRad);
+            // Calculate input to output offset
+            float input_offset_x = ((output_worldP->width - input_worldP->width) / 2.0f);
+            float input_offset_y = ((output_worldP->height - input_worldP->height) / 2.0f);
 
-                // Check if we're in 16-bit mode by examining world structure
-                bool is16bit = false;
-                bool is32bit = false;
+            float sin_rot = sin(angleRad);
+            float cos_rot = cos(angleRad);
 
-                // Determine pixel depth by examining the world
-                double bytesPerPixel = (double)input_worldP->rowbytes / (double)input_worldP->width;
+            // Setup sampling parameters
+            PF_SampPB samp_pb;
+            AEFX_CLR_STRUCT(samp_pb);
+            samp_pb.src = input_worldP;
 
-                if (bytesPerPixel >= 16.0) { // 32-bit float (4 channels * 4 bytes)
-                    is32bit = true;
-                }
-                else if (bytesPerPixel >= 8.0) { // 16-bit (4 channels * 2 bytes)
-                    is16bit = true;
-                }
+            for (A_long y = 0; y < output_worldP->height; y++) {
+                for (A_long x = 0; x < output_worldP->width; x++) {
+                    // Adjust coordinates relative to anchor point
+                    float dx = (x - input_offset_x) - center_x;
+                    float dy = (y - input_offset_y) - center_y;
 
-                // Perform rotation based on pixel depth
-                if (is32bit) {
-                    // 32-bit floating point
-                    for (A_long y = 0; y < output_worldP->height; y++) {
-                        PF_PixelFloat* outRow = (PF_PixelFloat*)((char*)output_worldP->data +
-                            y * output_worldP->rowbytes);
+                    // Apply rotation
+                    float rotated_x = center_x + (dx * cos_rot - dy * sin_rot);
+                    float rotated_y = center_y + (dx * sin_rot + dy * cos_rot);
 
-                        for (A_long x = 0; x < output_worldP->width; x++) {
-                            // Calculate the source point by applying inverse rotation
-                            double dx = x - centerX;
-                            double dy = y - centerY;
+                    // Convert back to source space
+                    float src_x = rotated_x - in_data->pre_effect_source_origin_x;
+                    float src_y = rotated_y - in_data->pre_effect_source_origin_y;
 
-                            double srcX = centerX + (dx * cos_angle + dy * sin_angle);
-                            double srcY = centerY + (-dx * sin_angle + dy * cos_angle);
+                    PF_Fixed fix_x = (PF_Fixed)(src_x * 65536.0f);
+                    PF_Fixed fix_y = (PF_Fixed)(src_y * 65536.0f);
 
-                            // Check if source point is within bounds
-                            if (srcX >= 0 && srcX < input_worldP->width - 1 &&
-                                srcY >= 0 && srcY < input_worldP->height - 1) {
+                    if (src_x >= 0 && src_x < input_worldP->width &&
+                        src_y >= 0 && src_y < input_worldP->height) {
 
-                                // Simple nearest neighbor sampling
-                                A_long sx = (A_long)(srcX + 0.5);
-                                A_long sy = (A_long)(srcY + 0.5);
-
-                                PF_PixelFloat* inRow = (PF_PixelFloat*)((char*)input_worldP->data +
-                                    sy * input_worldP->rowbytes);
-
-                                outRow[x] = inRow[sx];
-                            }
-                            else {
-                                // Outside the source image, set to transparent black
-                                outRow[x].alpha = 0;
-                                outRow[x].red = 0;
-                                outRow[x].green = 0;
-                                outRow[x].blue = 0;
-                            }
+                        switch (worldType) {
+                        case AEGP_WorldType_8: {
+                            PF_Pixel8* outRow = (PF_Pixel8*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            PF_Pixel8 sample;
+                            ERR(suites.Sampling8Suite1()->subpixel_sample(in_data->effect_ref,
+                                fix_x, fix_y, &samp_pb, &sample));
+                            outRow[x] = sample;
+                            break;
+                        }
+                        case AEGP_WorldType_16: {
+                            PF_Pixel16* outRow = (PF_Pixel16*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            PF_Pixel16 sample;
+                            ERR(suites.Sampling16Suite1()->subpixel_sample16(in_data->effect_ref,
+                                fix_x, fix_y, &samp_pb, &sample));
+                            outRow[x] = sample;
+                            break;
+                        }
+                        case AEGP_WorldType_32: {
+                            PF_PixelFloat* outRow = (PF_PixelFloat*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            PF_PixelFloat sample;
+                            ERR(suites.SamplingFloatSuite1()->subpixel_sample_float(in_data->effect_ref,
+                                fix_x, fix_y, &samp_pb, &sample));
+                            outRow[x] = sample;
+                            break;
+                        }
                         }
                     }
-                }
-                else if (is16bit) {
-                    // 16-bit
-                    for (A_long y = 0; y < output_worldP->height; y++) {
-                        PF_Pixel16* outRow = (PF_Pixel16*)((char*)output_worldP->data +
-                            y * output_worldP->rowbytes);
-
-                        for (A_long x = 0; x < output_worldP->width; x++) {
-                            // Calculate the source point by applying inverse rotation
-                            double dx = x - centerX;
-                            double dy = y - centerY;
-
-                            double srcX = centerX + (dx * cos_angle + dy * sin_angle);
-                            double srcY = centerY + (-dx * sin_angle + dy * cos_angle);
-
-                            // Check if source point is within bounds
-                            if (srcX >= 0 && srcX < input_worldP->width - 1 &&
-                                srcY >= 0 && srcY < input_worldP->height - 1) {
-
-                                // Simple nearest neighbor sampling
-                                A_long sx = (A_long)(srcX + 0.5);
-                                A_long sy = (A_long)(srcY + 0.5);
-
-                                PF_Pixel16* inRow = (PF_Pixel16*)((char*)input_worldP->data +
-                                    sy * input_worldP->rowbytes);
-
-                                outRow[x] = inRow[sx];
-                            }
-                            else {
-                                // Outside the source image, set to transparent black
-                                outRow[x].alpha = 0;
-                                outRow[x].red = 0;
-                                outRow[x].green = 0;
-                                outRow[x].blue = 0;
-                            }
+                    else {
+                        switch (worldType) {
+                        case AEGP_WorldType_8: {
+                            PF_Pixel8* outRow = (PF_Pixel8*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            outRow[x].alpha = 0;
+                            outRow[x].red = outRow[x].green = outRow[x].blue = 0;
+                            break;
                         }
-                    }
-                }
-                else {
-                    // 8-bit (default)
-                    for (A_long y = 0; y < output_worldP->height; y++) {
-                        PF_Pixel8* outRow = (PF_Pixel8*)((char*)output_worldP->data +
-                            y * output_worldP->rowbytes);
-
-                        for (A_long x = 0; x < output_worldP->width; x++) {
-                            // Calculate the source point by applying inverse rotation
-                            double dx = x - centerX;
-                            double dy = y - centerY;
-
-                            double srcX = centerX + (dx * cos_angle + dy * sin_angle);
-                            double srcY = centerY + (-dx * sin_angle + dy * cos_angle);
-
-                            // Check if source point is within bounds
-                            if (srcX >= 0 && srcX < input_worldP->width - 1 &&
-                                srcY >= 0 && srcY < input_worldP->height - 1) {
-
-                                // Simple nearest neighbor sampling
-                                A_long sx = (A_long)(srcX + 0.5);
-                                A_long sy = (A_long)(srcY + 0.5);
-
-                                PF_Pixel8* inRow = (PF_Pixel8*)((char*)input_worldP->data +
-                                    sy * input_worldP->rowbytes);
-
-                                outRow[x] = inRow[sx];
-                            }
-                            else {
-                                // Outside the source image, set to transparent black
-                                outRow[x].alpha = 0;
-                                outRow[x].red = 0;
-                                outRow[x].green = 0;
-                                outRow[x].blue = 0;
-                            }
+                        case AEGP_WorldType_16: {
+                            PF_Pixel16* outRow = (PF_Pixel16*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            outRow[x].alpha = 0;
+                            outRow[x].red = outRow[x].green = outRow[x].blue = 0;
+                            break;
+                        }
+                        case AEGP_WorldType_32: {
+                            PF_PixelFloat* outRow = (PF_PixelFloat*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+                            outRow[x].alpha = 0;
+                            outRow[x].red = outRow[x].green = outRow[x].blue = 0;
+                            break;
+                        }
                         }
                     }
                 }
             }
         }
 
-        // Check in the input layer pixels
+        // Check in resources
         if (input_worldP) {
             err = extra->cb->checkin_layer_pixels(in_data->effect_ref, SWING_INPUT);
-            if (err) {
-                return err;
-            }
         }
-    }
-    catch (const std::exception& e) {
-        err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+
+        ERR(PF_CHECKIN_PARAM(in_data, &freq_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &angle1_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &angle2_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &phase_param));
+        ERR(PF_CHECKIN_PARAM(in_data, &wave_param));
     }
     catch (...) {
         err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -562,6 +655,7 @@ SmartRender(
 
     return err;
 }
+
 
 /**
  * Legacy rendering function for older AE versions
@@ -857,4 +951,3 @@ EffectMain(
 
     return err;
 }
-
