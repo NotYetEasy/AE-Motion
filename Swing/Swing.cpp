@@ -1,3 +1,9 @@
+#define NOMINMAX
+
+#include "Swing.h"
+#include <math.h>
+#include <fstream>
+#include <chrono>
 #include <iomanip>
 #include <string>
 #include <sstream>
@@ -324,10 +330,10 @@ static PF_Err SmartPreRender(
 
         // Create our expanded rect accounting for pre-effect source origin
         PF_Rect expanded_rect = request_rect;
-        expanded_rect.left = request_rect.left - expansion + in_data->pre_effect_source_origin_x;
-        expanded_rect.top = request_rect.top - expansion + in_data->pre_effect_source_origin_y;
-        expanded_rect.right = request_rect.right + expansion + in_data->pre_effect_source_origin_x;
-        expanded_rect.bottom = request_rect.bottom + expansion + in_data->pre_effect_source_origin_y;
+        expanded_rect.left += in_data->pre_effect_source_origin_x;
+        expanded_rect.top += in_data->pre_effect_source_origin_y;
+        expanded_rect.right += in_data->pre_effect_source_origin_x;
+        expanded_rect.bottom += in_data->pre_effect_source_origin_y;
 
         // Get anchor point and transform
         PF_Point anchor_point = { 0,0 };
@@ -345,30 +351,22 @@ static PF_Err SmartPreRender(
             ERR(suites.LayerSuite9()->AEGP_GetLayerToWorldXform(layerH, &current_time_val, &transform));
 
             // Get anchor point
-            AEGP_StreamRefH streamH = NULL;
-            ERR(suites.StreamSuite5()->AEGP_GetNewLayerStream(
-                NULL,
-                layerH,
-                AEGP_LayerStream_ANCHORPOINT,
-                &streamH));
+            ERR(GetLayerAnchorPoint(in_data, layerH, &current_time_val, &anchor_point));
+        }
 
-            if (!err && streamH) {
-                AEGP_StreamValue2 stream_value;
-                ERR(suites.StreamSuite5()->AEGP_GetNewStreamValue(
-                    NULL,
-                    streamH,
-                    AEGP_LTimeMode_LayerTime,
-                    &current_time_val,
-                    true,
-                    &stream_value));
+        // Check for frequency keyframes
+        bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
 
-                if (!err) {
-                    anchor_point.x = (A_short)stream_value.val.two_d.x;
-                    anchor_point.y = (A_short)stream_value.val.two_d.y;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+        // Calculate current time and time shift if needed
+        double current_time = (double)in_data->current_time / (double)in_data->time_scale;
+        A_long time_shift = 0;
+
+        if (has_frequency_keyframes) {
+            time_shift = in_data->time_step / 2;
+            A_Time shifted_time;
+            shifted_time.value = in_data->current_time + time_shift;
+            shifted_time.scale = in_data->time_scale;
+            current_time = (double)shifted_time.value / (double)shifted_time.scale;
         }
 
         // Create data structure for GuidMixInPtr
@@ -385,6 +383,9 @@ static PF_Err SmartPreRender(
             float pre_effect_source_origin_y;
             float downsample_x;
             float downsample_y;
+            bool has_frequency_keyframes;
+            A_long time_shift;
+            double current_time;
         } mix_data;
 
         // Fill the structure
@@ -400,6 +401,9 @@ static PF_Err SmartPreRender(
         mix_data.pre_effect_source_origin_y = in_data->pre_effect_source_origin_y;
         mix_data.downsample_x = downsample_x;
         mix_data.downsample_y = downsample_y;
+        mix_data.has_frequency_keyframes = has_frequency_keyframes;
+        mix_data.time_shift = time_shift;
+        mix_data.current_time = current_time;
 
         // Mix in the data for caching
         ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(mix_data), &mix_data));
@@ -439,7 +443,6 @@ static PF_Err SmartPreRender(
 
     return err;
 }
-
 
 static PF_Err
 SmartRender(
@@ -498,8 +501,27 @@ SmartRender(
                 break;
             }
 
-            // Calculate animation parameters
+            // Check if there are any frequency keyframes
+            bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
+
+            // Calculate current time in seconds
             double current_time = (double)in_data->current_time / (double)in_data->time_scale;
+
+            // If there are any frequency keyframes, always advance time by half a frame
+            if (has_frequency_keyframes) {
+                // Shift by half a frame in time units
+                A_long time_shift = in_data->time_step / 2;
+
+                // Create a new time value with the shift applied
+                A_Time shifted_time;
+                shifted_time.value = in_data->current_time + time_shift;
+                shifted_time.scale = in_data->time_scale;
+
+                // Convert to seconds for the calculation
+                current_time = (double)shifted_time.value / (double)shifted_time.scale;
+            }
+
+            // Calculate animation parameters
             double frequency = freq_param.u.fs_d.value;
             double angle1 = angle1_param.u.fs_d.value;
             double angle2 = angle2_param.u.fs_d.value;
@@ -523,37 +545,18 @@ SmartRender(
                 current_time_val.value = in_data->current_time;
                 current_time_val.scale = in_data->time_scale;
 
-                AEGP_StreamRefH streamH = NULL;
-                ERR(suites.StreamSuite5()->AEGP_GetNewLayerStream(
-                    NULL,
-                    layerH,
-                    AEGP_LayerStream_ANCHORPOINT,
-                    &streamH));
-
-                if (!err && streamH) {
-                    AEGP_StreamValue2 stream_value;
-                    ERR(suites.StreamSuite5()->AEGP_GetNewStreamValue(
-                        NULL,
-                        streamH,
-                        AEGP_LTimeMode_LayerTime,
-                        &current_time_val,
-                        true,
-                        &stream_value));
-
-                    if (!err) {
-                        anchor_point.x = (A_short)stream_value.val.two_d.x;
-                        anchor_point.y = (A_short)stream_value.val.two_d.y;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
+                GetLayerAnchorPoint(in_data, layerH, &current_time_val, &anchor_point);
             }
 
-            // Calculate proper center coordinates
+            // Get downsample factors
+            float downsample_x = (float)in_data->downsample_x.den / (float)in_data->downsample_x.num;
+            float downsample_y = (float)in_data->downsample_y.den / (float)in_data->downsample_y.num;
+
+            // Calculate center point in full resolution
             float center_x = anchor_point.x + in_data->pre_effect_source_origin_x;
             float center_y = anchor_point.y + in_data->pre_effect_source_origin_y;
 
-            // Calculate input to output offset
+            // Calculate input to output offset to maintain centering
             float input_offset_x = ((output_worldP->width - input_worldP->width) / 2.0f);
             float input_offset_y = ((output_worldP->height - input_worldP->height) / 2.0f);
 
@@ -567,23 +570,28 @@ SmartRender(
 
             for (A_long y = 0; y < output_worldP->height; y++) {
                 for (A_long x = 0; x < output_worldP->width; x++) {
-                    // Adjust coordinates relative to anchor point
-                    float dx = (x - input_offset_x) - center_x;
-                    float dy = (y - input_offset_y) - center_y;
+                    // In SmartRender, modify the coordinate transformation section:
+                    float dx = (x - input_offset_x - (center_x / downsample_x));
+                    float dy = (y - input_offset_y - (center_y / downsample_y));
 
                     // Apply rotation
-                    float rotated_x = center_x + (dx * cos_rot - dy * sin_rot);
-                    float rotated_y = center_y + (dx * sin_rot + dy * cos_rot);
+                    float rotated_x = (dx * cos_rot - dy * sin_rot) + (center_x / downsample_x);
+                    float rotated_y = (dx * sin_rot + dy * cos_rot) + (center_y / downsample_y);
 
-                    // Convert back to source space
-                    float src_x = rotated_x - in_data->pre_effect_source_origin_x;
-                    float src_y = rotated_y - in_data->pre_effect_source_origin_y;
+                    // Convert back to source space considering pre-effect origin
+                    rotated_x = (rotated_x * downsample_x) - in_data->pre_effect_source_origin_x;
+                    rotated_y = (rotated_y * downsample_y) - in_data->pre_effect_source_origin_y;
 
-                    PF_Fixed fix_x = (PF_Fixed)(src_x * 65536.0f);
-                    PF_Fixed fix_y = (PF_Fixed)(src_y * 65536.0f);
+                    // Scale back to sampling coordinates
+                    rotated_x /= downsample_x;
+                    rotated_y /= downsample_y;
 
-                    if (src_x >= 0 && src_x < input_worldP->width &&
-                        src_y >= 0 && src_y < input_worldP->height) {
+                    // Convert to fixed point format for sampling
+                    PF_Fixed fix_x = (PF_Fixed)(rotated_x * 65536.0f);
+                    PF_Fixed fix_y = (PF_Fixed)(rotated_y * 65536.0f);
+
+                    if (rotated_x >= 0 && rotated_x < input_worldP->width &&
+                        rotated_y >= 0 && rotated_y < input_worldP->height) {
 
                         switch (worldType) {
                         case AEGP_WorldType_8: {
@@ -655,6 +663,8 @@ SmartRender(
 
     return err;
 }
+
+
 
 
 /**
