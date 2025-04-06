@@ -86,13 +86,24 @@ enum {
 #define STR_Wave_Param_Name "Wave"
 
 // Structure to hold effect parameters
-typedef struct SwingInfo {
+struct {
     double frequency;
     double angle1;
     double angle2;
     double phase;
-    A_long wave_type;
-} SwingInfo;
+    A_long waveType;
+    PF_Rect expanded_rect;
+    PF_Point anchor_point;
+    A_Matrix4 transform;
+    float pre_effect_source_origin_x;
+    float pre_effect_source_origin_y;
+    float downsample_x;
+    float downsample_y;
+    bool has_frequency_keyframes;
+    A_long time_shift;
+    double current_time;
+} mix_data;
+
 
 extern "C" {
     DllExport
