@@ -14,7 +14,7 @@ resource 'PiPL' (16000) {
             "Oscillate"
         },
         Category {
-            "Sample Plug-ins"
+            "DKT Effects"
         },
 #ifdef AE_OS_WIN
     #ifdef AE_PROC_INTELx64
@@ -44,7 +44,7 @@ resource 'PiPL' (16000) {
             0x7400606
         },
         AE_Effect_Global_OutFlags_2 {
-            0x008021580
+            0x8221580
         },
         AE_Effect_Match_Name {
             "DKT Oscillate"
