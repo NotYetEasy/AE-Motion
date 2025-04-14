@@ -485,25 +485,12 @@
          // Set output flags
          extra->output->solid = FALSE;
          extra->output->pre_render_data = NULL;
- 
-         // Critical: Don't return extra pixels flag
-         // This tells After Effects we won't render outside what was requested
          extra->output->flags = 0; // Not using PF_RenderOutputFlag_RETURNS_EXTRA_PIXELS
      }
  
      return err;
  }
  
- /**
-  * Data structure for thread-local rendering information
-  */
- typedef struct {
-     RandomMoveInfo info;
-     PF_FpLong current_time;
-     PF_InData* in_data;
-     PF_EffectWorld* input_worldP;
-     PF_EffectWorld* output_worldP;
- } ThreadRenderData;
  
  /**
   * Calculate wave value (sine or triangle)

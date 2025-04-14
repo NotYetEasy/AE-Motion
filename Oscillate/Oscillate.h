@@ -77,5 +77,13 @@ extern "C" {
         void            *extra);
 }
 
+typedef struct {
+    RandomMoveInfo info;
+    PF_FpLong current_time;
+    PF_InData* in_data;
+    PF_EffectWorld* input_worldP;
+    PF_EffectWorld* output_worldP;
+} ThreadRenderData;
+
 #endif // RANDOMMOVE_H
 
