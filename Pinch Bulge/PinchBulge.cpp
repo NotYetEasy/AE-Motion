@@ -327,7 +327,7 @@ GPUDeviceSetup(
 		ScopedAutoreleasePool pool;
 
 		//Create a library from source
-		NSString* source = [NSString stringWithCString : kSDK_Invert_ProcAmp_Kernel_MetalString encoding : NSUTF8StringEncoding];
+		NSString* source = [NSString stringWithCString : kPinchBulgeKernel_MetalString encoding : NSUTF8StringEncoding];
 		id<MTLDevice> device = (id<MTLDevice>)device_info.devicePV;
 
 		NSError* error = nil;

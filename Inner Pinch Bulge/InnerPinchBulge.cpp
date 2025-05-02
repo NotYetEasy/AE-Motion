@@ -1,6 +1,6 @@
 #if HAS_CUDA
 #include <cuda_runtime.h>
-// SDK_Invert_ProcAmp.h defines these and are needed whereas the cuda_runtime ones are not.
+
 #undef MAJOR_VERSION
 #undef MINOR_VERSION
 #endif
