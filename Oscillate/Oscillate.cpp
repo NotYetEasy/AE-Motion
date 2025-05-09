@@ -8,7 +8,6 @@
 #include "Oscillate.h"
 #include <iostream>
 
-// brings in M_PI on Windows
 #define _USE_MATH_DEFINES
 #include <math.h>
 
@@ -17,7 +16,6 @@ inline PF_Err CL2Err(cl_int cl_result) {
 		return PF_Err_NONE;
 	}
 	else {
-		// set a breakpoint here to pick up OpenCL errors.
 		return PF_Err_INTERNAL_STRUCT_DAMAGED;
 	}
 }
@@ -25,7 +23,6 @@ inline PF_Err CL2Err(cl_int cl_result) {
 #define CL_ERR(FUNC) ERR(CL2Err(FUNC))
 
 
-// CUDA kernel; see Oscillate.cu
 extern void Oscillate_CUDA(
 	float const* src,
 	float* dst,
@@ -43,7 +40,15 @@ extern void Oscillate_CUDA(
 	float currentTime,
 	int xTiles,
 	int yTiles,
-	int mirror);
+	int mirror,
+	float downsample_x,
+	float downsample_y,
+	int compatibilityEnabled,
+	float compatAngle,
+	float compatFrequency,
+	float compatMagnitude,
+	int compatWaveType,
+	int normalEnabled);                     
 
 static PF_Err
 About(
@@ -74,16 +79,13 @@ GlobalSetup(
 {
 	PF_Err	err = PF_Err_NONE;
 
-	// Set version information
 	out_data->my_version = PF_VERSION(MAJOR_VERSION,
 		MINOR_VERSION,
 		BUG_VERSION,
 		STAGE_VERSION,
 		BUILD_VERSION);
 
-	// Set plugin flags
-	out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE |
-		PF_OutFlag_NON_PARAM_VARY;
+	out_data->out_flags = PF_OutFlag_DEEP_COLOR_AWARE;
 
 	out_data->out_flags2 = PF_OutFlag2_SUPPORTS_SMART_RENDER |
 		PF_OutFlag2_FLOAT_COLOR_AWARE |
@@ -91,33 +93,6 @@ GlobalSetup(
 		PF_OutFlag2_I_MIX_GUID_DEPENDENCIES |
 		PF_OutFlag2_SUPPORTS_GPU_RENDER_F32 |
 		PF_OutFlag2_SUPPORTS_DIRECTX_RENDERING;
-
-	return err;
-}
-
-static PF_Err UpdateParameterUI(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[])
-{
-	PF_Err err = PF_Err_NONE;
-	AEGP_SuiteHandler suites(in_data->pica_basicP);
-
-	// Get the direction value (subtract 1 to convert from 1-based to 0-based)
-	A_long direction = params[DIRECTION_SLIDER]->u.pd.value - 1;
-
-	// Create a copy of the angle parameter to modify
-	PF_ParamDef param_copy = *params[ANGLE_SLIDER];
-
-	// Disable angle parameter when "Depth" (direction = 1) is selected
-	if (direction == 1) {  // Depth selected
-		param_copy.ui_flags |= PF_PUI_DISABLED;
-	}
-	else {
-		param_copy.ui_flags &= ~PF_PUI_DISABLED;
-	}
-
-	// Update the UI
-	ERR(suites.ParamUtilsSuite3()->PF_UpdateParamUI(in_data->effect_ref,
-		ANGLE_SLIDER,
-		&param_copy));
 
 	return err;
 }
@@ -132,34 +107,32 @@ ParamsSetup(
 	PF_Err err = PF_Err_NONE;
 	PF_ParamDef def;
 
-	// Clear parameter definition structure
 	AEFX_CLR_STRUCT(def);
 
-	// Direction parameter (Angle, Depth, or Orbit)
+	PF_ADD_CHECKBOX("Normal",
+		"",
+		TRUE,
+		0,
+		NORMAL_CHECKBOX_ID);
+
+	AEFX_CLR_STRUCT(def);
+
+	def.flags = PF_ParamFlag_SUPERVISE;      
 	PF_ADD_POPUP("Direction",
-		3,                        // Number of choices
-		1,                        // Default choice (1-based)
-		"Angle|Depth|Orbit",      // Choices
-		PF_ParamFlag_SUPERVISE,   // Enable parameter supervision
+		3,                           
+		1,                           
+		"Angle|Depth|Orbit",       
+		0,                                
 		DIRECTION_SLIDER);
 
 	AEFX_CLR_STRUCT(def);
 
-	// Angle parameter (in degrees)
-	PF_ADD_FLOAT_SLIDERX("Angle",
-		-3600.0,           // Min value
-		3600.0,           // Max value
-		0.0,              // Valid min
-		360.0,            // Valid max
-		45.0,             // Default value
-		PF_Precision_TENTHS,
-		PF_ParamFlag_SUPERVISE,
-		0,
+	PF_ADD_ANGLE("Angle",
+		45,
 		ANGLE_SLIDER);
 
 	AEFX_CLR_STRUCT(def);
 
-	// Frequency parameter (oscillation speed)
 	PF_ADD_FLOAT_SLIDERX("Frequency",
 		FREQUENCY_MIN,
 		FREQUENCY_MAX,
@@ -173,7 +146,6 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 
-	// Magnitude parameter (oscillation amount)
 	PF_ADD_FLOAT_SLIDERX("Magnitude",
 		MAGNITUDE_MIN,
 		MAGNITUDE_MAX,
@@ -187,17 +159,15 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 
-	// Wave type parameter (Sine or Triangle)
 	PF_ADD_POPUP("Wave",
-		2,                     // Number of choices
-		1,                     // Default choice (1-based)
-		"Sine|Triangle",       // Choices
-		0,                     // Flags
+		2,                        
+		1,                        
+		"Sine|Triangle",        
+		0,                      
 		WAVE_TYPE_SLIDER);
 
 	AEFX_CLR_STRUCT(def);
 
-	// Phase parameter (wave offset)
 	PF_ADD_FLOAT_SLIDERX("Phase",
 		0.0,
 		1000.0,
@@ -209,14 +179,12 @@ ParamsSetup(
 		0,
 		PHASE_SLIDER);
 
-	// Add Tiles group start
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_START;
 	PF_STRCPY(def.name, "Tiles");
-	def.flags = PF_ParamFlag_START_COLLAPSED;  // Start with group collapsed
+	def.flags = PF_ParamFlag_START_COLLAPSED;      
 	PF_ADD_PARAM(in_data, -1, &def);
 
-	// Add X Tiles parameter as a checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("X Tiles",
 		"",
@@ -224,7 +192,6 @@ ParamsSetup(
 		0,
 		X_TILES_DISK_ID);
 
-	// Add Y Tiles parameter as a checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("Y Tiles",
 		"",
@@ -232,7 +199,6 @@ ParamsSetup(
 		0,
 		Y_TILES_DISK_ID);
 
-	// Add Mirror checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("Mirror",
 		"",
@@ -240,18 +206,117 @@ ParamsSetup(
 		0,
 		MIRROR_DISK_ID);
 
-	// Add Tiles group end
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_END;
 	PF_ADD_PARAM(in_data, -1, &def);
 
-	// Set total number of parameters
+	AEFX_CLR_STRUCT(def);
+	def.param_type = PF_Param_GROUP_START;
+	PF_STRCPY(def.name, "Compatibility");
+	def.flags = PF_ParamFlag_START_COLLAPSED;      
+	PF_ADD_PARAM(in_data, -1, &def);
+
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_CHECKBOX("Compatibility",
+		"",
+		FALSE,
+		0,
+		COMPATIBILITY_CHECKBOX_ID);
+
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDERX("Angle",
+		0,
+		180,
+		0,
+		180,
+		0,
+		PF_Precision_INTEGER,
+		0,
+		0,
+		COMPATIBILITY_ANGLE_DISK_ID);
+
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDERX("Frequency",
+		0.1,
+		16.0,
+		0.1,
+		16.0,
+		0.1,
+		PF_Precision_TENTHS,
+		0,
+		0,
+		COMPATIBILITY_FREQUENCY_DISK_ID);
+
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_FLOAT_SLIDERX("Magnitude",
+		1.00,
+		499.00,
+		1.00,
+		499.00,
+		1.00,
+		PF_Precision_HUNDREDTHS,
+		0,
+		0,
+		COMPATIBILITY_MAGNITUDE_DISK_ID);
+
+	AEFX_CLR_STRUCT(def);
+	PF_ADD_POPUP("Wave Type",
+		2,                        
+		1,                        
+		"Sine|Triangle",        
+		0,                      
+		COMPATIBILITY_WAVE_TYPE_DISK_ID);
+
+	AEFX_CLR_STRUCT(def);
+	def.param_type = PF_Param_GROUP_END;
+	PF_ADD_PARAM(in_data, -1, &def);
+
 	out_data->num_params = RANDOMMOVE_NUM_PARAMS;
 
 	return err;
 }
 
-// Check if there are any keyframes on the frequency parameter
+
+static PF_Err
+UserChangedParam(
+	PF_InData* in_data,
+	PF_OutData* out_data,
+	PF_ParamDef* params[],
+	PF_LayerDef* output,
+	PF_UserChangedParamExtra* extra)
+{
+	PF_Err err = PF_Err_NONE;
+
+	if (extra->param_index == DIRECTION_SLIDER) {
+		A_long direction = params[DIRECTION_SLIDER]->u.pd.value;
+
+		PF_ParamDef angle_param_copy;
+		AEFX_CLR_STRUCT(angle_param_copy);
+
+		angle_param_copy = *(params[ANGLE_SLIDER]);
+
+		if (direction == 2) {     
+			angle_param_copy.ui_flags |= PF_PUI_DISABLED;
+		}
+		else {
+			angle_param_copy.ui_flags &= ~PF_PUI_DISABLED;
+		}
+
+		AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+		PF_ParamUtilsSuite3* paramUtils = suites.ParamUtilsSuite3();
+		if (paramUtils) {
+			err = paramUtils->PF_UpdateParamUI(
+				in_data->effect_ref,
+				ANGLE_SLIDER,
+				&angle_param_copy);
+		}
+	}
+
+	return err;
+}
+
+
 bool HasAnyFrequencyKeyframes(PF_InData* in_data)
 {
 	PF_Err err = PF_Err_NONE;
@@ -259,37 +324,30 @@ bool HasAnyFrequencyKeyframes(PF_InData* in_data)
 
 	AEGP_SuiteHandler suites(in_data->pica_basicP);
 
-	// Get the effect reference
 	AEGP_EffectRefH effect_ref = NULL;
 	AEGP_StreamRefH stream_ref = NULL;
 	A_long num_keyframes = 0;
 
-	// Get the effect reference
 	if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
 		AEGP_EffectRefH aegp_effect_ref = NULL;
 		err = suites.PFInterfaceSuite1()->AEGP_GetNewEffectForEffect(NULL, in_data->effect_ref, &aegp_effect_ref);
 
 		if (!err && aegp_effect_ref) {
-			// Get the stream for the frequency parameter
 			err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL,
 				aegp_effect_ref,
 				FREQUENCY_SLIDER,
 				&stream_ref);
 
 			if (!err && stream_ref) {
-				// Check how many keyframes are on this stream
 				err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(stream_ref, &num_keyframes);
 
-				// If there are any keyframes, set the flag
 				if (!err && num_keyframes > 0) {
 					has_keyframes = true;
 				}
 
-				// Dispose of the stream reference
 				suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
 			}
 
-			// Dispose of the effect reference
 			suites.EffectSuite4()->AEGP_DisposeEffect(aegp_effect_ref);
 		}
 	}
@@ -297,7 +355,6 @@ bool HasAnyFrequencyKeyframes(PF_InData* in_data)
 	return has_keyframes;
 }
 
-// GPU data initialized at GPU setup and used during render.
 struct OpenCLGPUData
 {
 	cl_kernel oscillate_kernel;
@@ -327,11 +384,11 @@ PF_Err NSError2PFErr(NSError* inError)
 {
 	if (inError)
 	{
-		return PF_Err_INTERNAL_STRUCT_DAMAGED;  // For debugging, uncomment above line and set breakpoint here
+		return PF_Err_INTERNAL_STRUCT_DAMAGED;           
 	}
 	return PF_Err_NONE;
 }
-#endif // HAS_METAL
+#endif  
 
 static PF_Err
 GPUDeviceSetup(
@@ -359,10 +416,7 @@ GPUDeviceSetup(
 		extraP->input->device_index,
 		&device_info);
 
-	// Load and compile the kernel - a real plugin would cache binaries to disk
-
 	if (extraP->input->what_gpu == PF_GPU_Framework_CUDA) {
-		// Nothing to do here. CUDA Kernel statically linked
 		out_dataP->out_flags2 = PF_OutFlag2_SUPPORTS_GPU_RENDER_F32;
 	}
 	else if (extraP->input->what_gpu == PF_GPU_Framework_OPENCL) {
@@ -401,11 +455,9 @@ GPUDeviceSetup(
 		DirectXGPUData* dx_gpu_data = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
 		memset(dx_gpu_data, 0, sizeof(DirectXGPUData));
 
-		// Create objects
 		dx_gpu_data->mContext = std::make_shared<DXContext>();
 		dx_gpu_data->mOscillateShader = std::make_shared<ShaderObject>();
 
-		// Create the DXContext
 		DX_ERR(dx_gpu_data->mContext->Initialize(
 			(ID3D12Device*)device_info.devicePV,
 			(ID3D12CommandQueue*)device_info.command_queuePV));
@@ -413,7 +465,6 @@ GPUDeviceSetup(
 		std::wstring csoPath, sigPath;
 		DX_ERR(GetShaderPath(L"OscillateKernel", csoPath, sigPath));
 
-		// Load the shader
 		DX_ERR(dx_gpu_data->mContext->LoadShader(
 			csoPath.c_str(),
 			sigPath.c_str(),
@@ -428,25 +479,21 @@ GPUDeviceSetup(
 	{
 		ScopedAutoreleasePool pool;
 
-		// Create a library from source
 		NSString* source = [NSString stringWithCString : kOscillateKernel_MetalString encoding : NSUTF8StringEncoding];
 		id<MTLDevice> device = (id<MTLDevice>)device_info.devicePV;
 
 		NSError* error = nil;
 		id<MTLLibrary> library = [[device newLibraryWithSource : source options : nil error : &error]autorelease];
 
-		// An error code is set for Metal compile warnings, so use nil library as the error signal
 		if (!err && !library) {
 			err = NSError2PFErr(error);
 		}
 
-		// For debugging only. This will contain Metal compile warnings and errors.
 		NSString* getError = error.localizedDescription;
 
 		PF_Handle metal_handle = handle_suite->host_new_handle(sizeof(MetalGPUData));
 		MetalGPUData* metal_data = reinterpret_cast<MetalGPUData*>(*metal_handle);
 
-		// Create pipeline state from function extracted from library
 		if (err == PF_Err_NONE)
 		{
 			id<MTLFunction> oscillate_function = nil;
@@ -501,8 +548,6 @@ GPUDeviceSetdown(
 		PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
 		DirectXGPUData* dx_gpu_dataP = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
 
-		// Note: DirectX: If deferred execution is implemented, a GPU sync is
-		// necessary before the plugin shutdown.
 		dx_gpu_dataP->mContext.reset();
 		dx_gpu_dataP->mOscillateShader.reset();
 
@@ -530,38 +575,43 @@ GPUDeviceSetdown(
 	return err;
 }
 
-// Triangle wave function
 static PF_FpLong TriangleWave(PF_FpLong t)
 {
-	// Shift phase by 0.75 and normalize to [0,1]
 	t = fmod(t + 0.75, 1.0);
 
-	// Handle negative values
 	if (t < 0)
 		t += 1.0;
 
-	// Transform to triangle wave [-1,1]
 	return (fabs(t - 0.5) - 0.25) * 4.0;
 }
 
-// Calculate wave value (sine or triangle)
 static PF_FpLong CalculateWaveValue(int wave_type, PF_FpLong frequency, PF_FpLong current_time, PF_FpLong phase)
 {
 	PF_FpLong X, m;
 
 	if (wave_type == 0) {
-		// Sine wave
 		X = (frequency * 2.0 * current_time) + (phase * 2.0);
 		m = sin(X * M_PI);
 	}
 	else {
-		// Triangle wave
 		X = ((frequency * 2.0 * current_time) + (phase * 2.0)) / 2.0 + phase;
 		m = TriangleWave(X);
 	}
 
 	return m;
 }
+
+
+static void
+DisposePreRenderData(
+	void* pre_render_dataPV)
+{
+	if (pre_render_dataPV) {
+		OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(pre_render_dataPV);
+		free(renderData);
+	}
+}
+
 
 static PF_Err
 SmartPreRender(
@@ -570,87 +620,156 @@ SmartPreRender(
 	PF_PreRenderExtra* extra)
 {
 	PF_Err err = PF_Err_NONE;
-
-	// Initialize effect info structure
-	RandomMoveInfo info;
-	AEFX_CLR_STRUCT(info);
-
-	PF_ParamDef param_copy;
-	AEFX_CLR_STRUCT(param_copy);
-
-	// Get parameters (we still need these for rendering)
-	ERR(PF_CHECKOUT_PARAM(in_data, DIRECTION_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.direction = param_copy.u.pd.value - 1;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, ANGLE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.angle = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, FREQUENCY_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.frequency = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, MAGNITUDE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.magnitude = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, WAVE_TYPE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.wave_type = param_copy.u.pd.value - 1;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, PHASE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.phase = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.x_tiles = param_copy.u.bd.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.y_tiles = param_copy.u.bd.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.mirror = param_copy.u.bd.value;
-
-	// Check if there are any frequency keyframes
-	bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
-
-	// Calculate time offset for animation
-	A_long time_offset = 0;
-	if (has_frequency_keyframes) {
-		time_offset = in_data->time_step / 2; // 0.5 frames in time units
-	}
-
-	// Set up render request
+	PF_CheckoutResult in_result;
 	PF_RenderRequest req = extra->input->output_request;
-	req.preserve_rgb_of_zero_alpha = TRUE;
 
-	// Checkout the input layer
-	PF_CheckoutResult checkout;
-	ERR(extra->cb->checkout_layer(in_data->effect_ref,
-		RANDOMMOVE_INPUT,
-		RANDOMMOVE_INPUT,
-		&req,
-		in_data->current_time,
-		in_data->time_step,
-		in_data->time_scale,
-		&checkout));
+	extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
 
-	if (!err) {
-		// Create detection data structure for GUID mixing
-		struct {
-			A_u_char has_frequency_keyframes;
-			A_long time_offset;
-			RandomMoveInfo info;
-		} detection_data;
+	OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(malloc(sizeof(OscillateRenderData)));
+	AEFX_CLR_STRUCT(*renderData);
 
-		detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
-		detection_data.time_offset = time_offset;
-		detection_data.info = info;
+	if (renderData) {
+		PF_ParamDef param_copy;
+		AEFX_CLR_STRUCT(param_copy);
 
-		// Mix in the data for caching
-		ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
+		ERR(PF_CHECKOUT_PARAM(in_data, NORMAL_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.normal = param_copy.u.bd.value;
 
-		// Update output parameters
-		extra->output->max_result_rect = checkout.max_result_rect;
-		extra->output->result_rect = checkout.result_rect;
-		extra->output->solid = FALSE;
-		extra->output->pre_render_data = NULL;
-		extra->output->flags = PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.compatibility = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, DIRECTION_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.direction = param_copy.u.pd.value - 1;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, ANGLE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) {
+			renderData->info.angle = (PF_FpLong)(param_copy.u.ad.value) / 65536.0;
+		}
+
+		ERR(PF_CHECKOUT_PARAM(in_data, FREQUENCY_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.frequency = param_copy.u.fs_d.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, MAGNITUDE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.magnitude = param_copy.u.fs_d.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, WAVE_TYPE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.wave_type = param_copy.u.pd.value - 1;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, PHASE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.phase = param_copy.u.fs_d.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.x_tiles = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.y_tiles = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.mirror = param_copy.u.bd.value;
+
+		if (renderData->info.compatibility) {
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_ANGLE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_angle = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_FREQUENCY_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_frequency = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_MAGNITUDE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_magnitude = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_WAVE_TYPE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_wave_type = param_copy.u.pd.value - 1;
+		}
+
+		bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
+
+		AEGP_LayerIDVal layer_id = 0;
+		AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+		PF_FpLong layer_time_offset = 0;
+		A_Ratio stretch_factor = { 1, 1 };      
+
+		if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+			AEGP_LayerH layer = NULL;
+
+			err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
+
+			if (!err && layer) {
+				err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
+
+				A_Time in_point;
+				err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
+
+				if (!err) {
+					layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
+					renderData->layer_start_seconds = layer_time_offset;
+				}
+
+				err = suites.LayerSuite9()->AEGP_GetLayerStretch(layer, &stretch_factor);
+			}
+		}
+
+		A_long time_offset = 0;
+		if (has_frequency_keyframes) {
+			time_offset = in_data->time_step / 2;      
+		}
+
+		PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
+
+		PF_FpLong stretch_ratio = (PF_FpLong)stretch_factor.num / (PF_FpLong)stretch_factor.den;
+
+		if (has_frequency_keyframes) {
+			A_long time_shift = in_data->time_step / 2;
+
+			A_Time shifted_time;
+			shifted_time.value = in_data->current_time + time_shift;
+			shifted_time.scale = in_data->time_scale;
+
+			current_time = (PF_FpLong)shifted_time.value / (PF_FpLong)shifted_time.scale;
+		}
+
+		current_time -= layer_time_offset;
+
+		current_time *= stretch_ratio;
+
+		renderData->current_time = current_time;
+
+		extra->output->pre_render_data = renderData;
+		extra->output->delete_pre_render_data_func = DisposePreRenderData;
+
+		ERR(extra->cb->checkout_layer(in_data->effect_ref,
+			RANDOMMOVE_INPUT,
+			RANDOMMOVE_INPUT,
+			&req,
+			in_data->current_time,
+			in_data->time_step,
+			in_data->time_scale,
+			&in_result));
+
+		if (!err) {
+			struct {
+				A_u_char has_frequency_keyframes;
+				A_long time_offset;
+				AEGP_LayerIDVal layer_id;        
+				A_Ratio stretch_factor;       
+				RandomMoveInfo info;
+			} detection_data;
+
+			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
+			detection_data.time_offset = time_offset;
+			detection_data.layer_id = layer_id;     
+			detection_data.stretch_factor = stretch_factor;     
+			detection_data.info = renderData->info;
+
+			ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
+
+			extra->output->max_result_rect = in_result.max_result_rect;
+			extra->output->result_rect = in_result.result_rect;
+			extra->output->solid = FALSE;
+		}
+	}
+	else {
+		err = PF_Err_OUT_OF_MEMORY;
 	}
 
 	return err;
@@ -661,54 +780,42 @@ static PixelType
 SampleBilinear(PixelType* src, PF_FpLong x, PF_FpLong y, A_long width, A_long height, A_long rowbytes,
 	bool x_tiles, bool y_tiles, bool mirror) {
 
-	// Initialize variables to track if we're sampling outside the image
 	bool outsideBounds = false;
 
-	// Handle tiling based on X and Y Tiles parameters
 	if (x_tiles) {
-		// X tiling is enabled
 		if (mirror) {
-			// Mirror tiling: create ping-pong pattern
 			float intPart;
 			float fracPart = modff(fabsf(x / width), &intPart);
 			int isOdd = (int)intPart & 1;
 			x = isOdd ? (1.0f - fracPart) * width : fracPart * width;
 		}
 		else {
-			// Regular repeat tiling
 			x = fmod(fmod(x, width) + width, width);
 		}
 	}
 	else {
-		// X tiling is disabled - check if outside bounds
 		if (x < 0 || x >= width) {
 			outsideBounds = true;
 		}
 	}
 
-	// Apply Y tiling
 	if (y_tiles) {
-		// Y tiling is enabled
 		if (mirror) {
-			// Mirror tiling: create ping-pong pattern
 			float intPart;
 			float fracPart = modff(fabsf(y / height), &intPart);
 			int isOdd = (int)intPart & 1;
 			y = isOdd ? (1.0f - fracPart) * height : fracPart * height;
 		}
 		else {
-			// Regular repeat tiling
 			y = fmod(fmod(y, height) + height, height);
 		}
 	}
 	else {
-		// Y tiling is disabled - check if outside bounds
 		if (y < 0 || y >= height) {
 			outsideBounds = true;
 		}
 	}
 
-	// If we're outside bounds and tiling is disabled, return transparent pixel
 	if (outsideBounds) {
 		PixelType transparent;
 		if constexpr (std::is_same_v<PixelType, PF_PixelFloat>) {
@@ -732,12 +839,9 @@ SampleBilinear(PixelType* src, PF_FpLong x, PF_FpLong y, A_long width, A_long he
 		return transparent;
 	}
 
-	// At this point, we're guaranteed to be within bounds or using tiling
-	// Clamp coordinates to valid range to avoid any out-of-bounds access
 	x = MAX(0, MIN(width - 1.001f, x));
 	y = MAX(0, MIN(height - 1.001f, y));
 
-	// Get integer and fractional parts
 	A_long x0 = static_cast<A_long>(x);
 	A_long y0 = static_cast<A_long>(y);
 	A_long x1 = MIN(x0 + 1, width - 1);
@@ -746,13 +850,11 @@ SampleBilinear(PixelType* src, PF_FpLong x, PF_FpLong y, A_long width, A_long he
 	PF_FpLong fx = x - x0;
 	PF_FpLong fy = y - y0;
 
-	// Get the four surrounding pixels
 	PixelType* p00 = (PixelType*)((char*)src + y0 * rowbytes) + x0;
 	PixelType* p01 = (PixelType*)((char*)src + y0 * rowbytes) + x1;
 	PixelType* p10 = (PixelType*)((char*)src + y1 * rowbytes) + x0;
 	PixelType* p11 = (PixelType*)((char*)src + y1 * rowbytes) + x1;
 
-	// Bilinear interpolation for each channel
 	PixelType result;
 	if constexpr (std::is_same_v<PixelType, PF_PixelFloat>) {
 		result.alpha = (1.0f - fx) * (1.0f - fy) * p00->alpha +
@@ -842,6 +944,20 @@ SmartRenderGPU(
 {
 	PF_Err err = PF_Err_NONE;
 
+	PF_RationalScale downsample_x = in_dataP->downsample_x;
+	PF_RationalScale downsample_y = in_dataP->downsample_y;
+
+	PF_FpLong downsample_factor_x = (PF_FpLong)downsample_x.num / (PF_FpLong)downsample_x.den;
+	PF_FpLong downsample_factor_y = (PF_FpLong)downsample_y.num / (PF_FpLong)downsample_y.den;
+
+	bool normal_enabled = infoP->normal;
+	bool compatibility_enabled = infoP->compatibility;
+
+	if ((!normal_enabled && !compatibility_enabled) || (normal_enabled && compatibility_enabled)) {
+		infoP->magnitude = 0;          
+		infoP->frequency = 0;       
+	}
+
 	AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpu_suite = AEFX_SuiteScoper<PF_GPUDeviceSuite1>(in_dataP,
 		kPFGPUDeviceSuite,
 		kPFGPUDeviceSuiteVersion1,
@@ -863,7 +979,6 @@ SmartRenderGPU(
 	void* dst_mem = 0;
 	ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, output_worldP, &dst_mem));
 
-	// Set up parameters for the kernel
 	typedef struct {
 		int srcPitch;
 		int dstPitch;
@@ -880,11 +995,18 @@ SmartRenderGPU(
 		int xTiles;
 		int yTiles;
 		int mirror;
+		float downsample_x;
+		float downsample_y;
+		int compatibilityEnabled;     
+		float compatAngle;            
+		float compatFrequency;        
+		float compatMagnitude;        
+		int compatWaveType;            
+		int normalEnabled;             
 	} OscillateParams;
 
 	OscillateParams params;
 
-	// Initialize parameters
 	params.width = input_worldP->width;
 	params.height = input_worldP->height;
 	params.is16f = (pixel_format != PF_PixelFormat_GPU_BGRA128);
@@ -900,6 +1022,15 @@ SmartRenderGPU(
 	params.xTiles = infoP->x_tiles;
 	params.yTiles = infoP->y_tiles;
 	params.mirror = infoP->mirror;
+	params.downsample_x = downsample_factor_x;
+	params.downsample_y = downsample_factor_y;
+
+	params.normalEnabled = normal_enabled;     
+	params.compatibilityEnabled = compatibility_enabled;
+	params.compatAngle = infoP->compat_angle;
+	params.compatFrequency = infoP->compat_frequency;
+	params.compatMagnitude = infoP->compat_magnitude;
+	params.compatWaveType = infoP->compat_wave_type;
 
 	if (!err && extraP->input->what_gpu == PF_GPU_Framework_OPENCL)
 	{
@@ -911,7 +1042,6 @@ SmartRenderGPU(
 
 		cl_uint param_index = 0;
 
-		// Set the arguments
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(cl_mem), &cl_src_mem));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(cl_mem), &cl_dst_mem));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.srcPitch));
@@ -929,8 +1059,15 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.xTiles));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.yTiles));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.mirror));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.downsample_x));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.downsample_y));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.compatibilityEnabled));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.compatAngle));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.compatFrequency));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.compatMagnitude));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.compatWaveType));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.normalEnabled));
 
-		// Launch the kernel
 		size_t threadBlock[2] = { 16, 16 };
 		size_t grid[2] = {
 			((params.width + threadBlock[0] - 1) / threadBlock[0]) * threadBlock[0],
@@ -967,7 +1104,15 @@ SmartRenderGPU(
 			params.currentTime,
 			params.xTiles,
 			params.yTiles,
-			params.mirror);
+			params.mirror,
+			params.downsample_x,
+			params.downsample_y,
+			params.compatibilityEnabled,
+			params.compatAngle,
+			params.compatFrequency,
+			params.compatMagnitude,
+			params.compatWaveType,
+			params.normalEnabled);      
 
 		if (cudaPeekAtLastError() != cudaSuccess) {
 			err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -980,13 +1125,11 @@ SmartRenderGPU(
 		PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
 		DirectXGPUData* dx_gpu_data = reinterpret_cast<DirectXGPUData*>(*gpu_dataH);
 
-		// Execute Oscillate
 		DXShaderExecution shaderExecution(
 			dx_gpu_data->mContext,
 			dx_gpu_data->mOscillateShader,
 			3);
 
-		// Note: The order of elements in the param structure should be identical to the order expected by the shader
 		DX_ERR(shaderExecution.SetParamBuffer(&params, sizeof(OscillateParams)));
 		DX_ERR(shaderExecution.SetUnorderedAccessView(
 			(ID3D12Resource*)dst_mem,
@@ -1007,13 +1150,11 @@ SmartRenderGPU(
 		PF_Handle metal_handle = (PF_Handle)extraP->input->gpu_data;
 		MetalGPUData* metal_dataP = reinterpret_cast<MetalGPUData*>(*metal_handle);
 
-		// Set the arguments
 		id<MTLDevice> device = (id<MTLDevice>)device_info.devicePV;
 		id<MTLBuffer> param_buffer = [[device newBufferWithBytes : &params
 			length : sizeof(OscillateParams)
 			options : MTLResourceStorageModeManaged]autorelease];
 
-		// Launch the command
 		id<MTLCommandQueue> queue = (id<MTLCommandQueue>)device_info.command_queuePV;
 		id<MTLCommandBuffer> commandBuffer = [queue commandBuffer];
 		id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
@@ -1037,7 +1178,7 @@ SmartRenderGPU(
 
 		err = NSError2PFErr([commandBuffer error]);
 	}
-#endif // HAS_METAL
+#endif  
 
 	return err;
 }
@@ -1054,78 +1195,135 @@ SmartRenderCPU(
 {
 	PF_Err err = PF_Err_NONE;
 
-	// Calculate angle in radians for direction vector
-	PF_FpLong angleRad = infoP->angle * M_PI / 180.0;
-	PF_FpLong dx = cos(angleRad);
-	PF_FpLong dy = sin(angleRad);
+	PF_RationalScale downsample_x = in_data->downsample_x;
+	PF_RationalScale downsample_y = in_data->downsample_y;
 
-	// Calculate wave value
-	PF_FpLong m = CalculateWaveValue(infoP->wave_type,
-		infoP->frequency,
-		current_time,
-		infoP->phase);
+	PF_FpLong downsample_factor_x = (PF_FpLong)downsample_x.num / (PF_FpLong)downsample_x.den;
+	PF_FpLong downsample_factor_y = (PF_FpLong)downsample_y.num / (PF_FpLong)downsample_y.den;
 
-	// Initialize transformation values
+	bool normal_enabled = infoP->normal;
+	bool compatibility_enabled = infoP->compatibility;
+
+	if ((!normal_enabled && !compatibility_enabled) || (normal_enabled && compatibility_enabled)) {
+		A_long height = output_worldP->height;
+		A_long width = output_worldP->width;
+
+		switch (pixel_format) {
+		case PF_PixelFormat_ARGB128: {
+			for (A_long y = 0; y < height; y++) {
+				PF_PixelFloat* srcP = (PF_PixelFloat*)((char*)input_worldP->data + y * input_worldP->rowbytes);
+				PF_PixelFloat* dstP = (PF_PixelFloat*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+				memcpy(dstP, srcP, width * sizeof(PF_PixelFloat));
+			}
+			break;
+		}
+		case PF_PixelFormat_ARGB64: {
+			for (A_long y = 0; y < height; y++) {
+				PF_Pixel16* srcP = (PF_Pixel16*)((char*)input_worldP->data + y * input_worldP->rowbytes);
+				PF_Pixel16* dstP = (PF_Pixel16*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+				memcpy(dstP, srcP, width * sizeof(PF_Pixel16));
+			}
+			break;
+		}
+		case PF_PixelFormat_ARGB32:
+		default: {
+			for (A_long y = 0; y < height; y++) {
+				PF_Pixel8* srcP = (PF_Pixel8*)((char*)input_worldP->data + y * input_worldP->rowbytes);
+				PF_Pixel8* dstP = (PF_Pixel8*)((char*)output_worldP->data + y * output_worldP->rowbytes);
+				memcpy(dstP, srcP, width * sizeof(PF_Pixel8));
+			}
+			break;
+		}
+		}
+		return err;
+	}
+
 	PF_FpLong offsetX = 0, offsetY = 0;
 	PF_FpLong scale = 100.0;
 
-	// Apply effect based on direction mode
-	switch (infoP->direction) {
-	case 0: // Angle mode - position offset only
-		offsetX = dx * infoP->magnitude * m;
-		offsetY = dy * infoP->magnitude * m;
-		break;
+	PF_FpLong angleRad;
+	PF_FpLong dx, dy;
+	PF_FpLong m;
 
-	case 1: // Depth mode - scale only
-		scale = 100.0 - (infoP->magnitude * m * 0.1);
-		break;
+	if (compatibility_enabled) {
 
-	case 2: { // Orbit mode - position offset and scale
-		offsetX = dx * infoP->magnitude * m;
-		offsetY = dy * infoP->magnitude * m;
+		angleRad = infoP->compat_angle * M_PI / 180.0;
+		dx = sin(angleRad);      
+		dy = cos(angleRad);      
 
-		// Calculate second wave with phase shift for scale
-		PF_FpLong phaseShift = infoP->wave_type == 0 ? 0.25 : 0.125;
+		PF_FpLong duration = 1.0;
+		PF_FpLong t = current_time;
+
+		if (infoP->compat_wave_type == 0) {
+			m = sin(t * duration * infoP->compat_frequency * 3.14159);
+		}
+		else {
+			PF_FpLong wavePhase = t * duration * infoP->compat_frequency / 2.0;
+			m = TriangleWave(wavePhase);
+		}
+
+		offsetX = dx * infoP->compat_magnitude * m * downsample_factor_x;
+		offsetY = dy * infoP->compat_magnitude * m * downsample_factor_y;
+	}
+	else if (normal_enabled) {
+		angleRad = infoP->angle * M_PI / 180.0;
+		dx = cos(angleRad);
+		dy = sin(angleRad);
+
 		m = CalculateWaveValue(infoP->wave_type,
 			infoP->frequency,
 			current_time,
-			infoP->phase + phaseShift);
+			infoP->phase);
 
-		scale = 100.0 - (infoP->magnitude * m * 0.1);
-		break;
-	}
+		switch (infoP->direction) {
+		case 0:       
+			offsetX = dx * (infoP->magnitude * downsample_factor_x) * m;
+			offsetY = dy * (infoP->magnitude * downsample_factor_y) * m;
+			break;
+
+		case 1:      
+			scale = 100.0 - (infoP->magnitude * m * 0.1);
+			break;
+
+		case 2: {        
+			offsetX = dx * (infoP->magnitude * downsample_factor_x) * m;
+			offsetY = dy * (infoP->magnitude * downsample_factor_y) * m;
+
+			PF_FpLong phaseShift = infoP->wave_type == 0 ? 0.25 : 0.125;
+			m = CalculateWaveValue(infoP->wave_type,
+				infoP->frequency,
+				current_time,
+				infoP->phase + phaseShift);
+
+			scale = 100.0 - (infoP->magnitude * m * 0.1);
+			break;
+		}
+		}
 	}
 
-	// Iterate through all pixels in the output buffer
 	A_long width = output_worldP->width;
 	A_long height = output_worldP->height;
 	A_long input_width = input_worldP->width;
 	A_long input_height = input_worldP->height;
 	A_long rowbytes = input_worldP->rowbytes;
 
-	// Calculate center point
 	PF_FpLong centerX = (width / 2.0);
 	PF_FpLong centerY = (height / 2.0);
 	PF_FpLong inputCenterX = (input_width / 2.0);
 	PF_FpLong inputCenterY = (input_height / 2.0);
 
-	// Calculate scale factor
 	PF_FpLong scaleFactorX = 100.0 / scale;
 	PF_FpLong scaleFactorY = 100.0 / scale;
 
-	// Process based on pixel format
 	switch (pixel_format) {
 	case PF_PixelFormat_ARGB128: {
-		// 32-bit float processing
 		for (A_long y = 0; y < height; y++) {
 			PF_PixelFloat* outP = (PF_PixelFloat*)((char*)output_worldP->data + y * output_worldP->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_PixelFloat>(
 					(PF_PixelFloat*)input_worldP->data,
 					srcX, srcY,
@@ -1140,16 +1338,13 @@ SmartRenderCPU(
 		break;
 	}
 	case PF_PixelFormat_ARGB64: {
-		// 16-bit processing
 		for (A_long y = 0; y < height; y++) {
 			PF_Pixel16* outP = (PF_Pixel16*)((char*)output_worldP->data + y * output_worldP->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_Pixel16>(
 					(PF_Pixel16*)input_worldP->data,
 					srcX, srcY,
@@ -1165,16 +1360,13 @@ SmartRenderCPU(
 	}
 	case PF_PixelFormat_ARGB32:
 	default: {
-		// 8-bit processing
 		for (A_long y = 0; y < height; y++) {
 			PF_Pixel8* outP = (PF_Pixel8*)((char*)output_worldP->data + y * output_worldP->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_Pixel8>(
 					(PF_Pixel8*)input_worldP->data,
 					srcX, srcY,
@@ -1193,6 +1385,7 @@ SmartRenderCPU(
 	return err;
 }
 
+
 static PF_Err
 SmartRender(
 	PF_InData* in_data,
@@ -1200,94 +1393,36 @@ SmartRender(
 	PF_SmartRenderExtra* extraP,
 	bool isGPU)
 {
-	PF_Err err = PF_Err_NONE;
-	PF_Err err2 = PF_Err_NONE;
+	PF_Err err = PF_Err_NONE,
+		err2 = PF_Err_NONE;
 
-	PF_EffectWorld* input_worldP = NULL;
-	PF_EffectWorld* output_worldP = NULL;
+	PF_EffectWorld* input_worldP = NULL,
+		* output_worldP = NULL;
 
-	// Get parameters for rendering
-	RandomMoveInfo info;
-	AEFX_CLR_STRUCT(info);
+	OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(extraP->input->pre_render_data);
 
-	PF_ParamDef param_copy;
-	AEFX_CLR_STRUCT(param_copy);
-
-	// Get all effect parameters
-	ERR(PF_CHECKOUT_PARAM(in_data, DIRECTION_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.direction = param_copy.u.pd.value - 1;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, ANGLE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.angle = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, FREQUENCY_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.frequency = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, MAGNITUDE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.magnitude = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, WAVE_TYPE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.wave_type = param_copy.u.pd.value - 1;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, PHASE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.phase = param_copy.u.fs_d.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.x_tiles = param_copy.u.bd.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.y_tiles = param_copy.u.bd.value;
-
-	ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-	if (!err) info.mirror = param_copy.u.bd.value;
-
-	// Check if there are any frequency keyframes
-	bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
-
-	// Convert current time to seconds for wave calculations
-	PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
-
-	// If there are any frequency keyframes, always advance time by half a frame
-	if (has_frequency_keyframes) {
-		// Shift by half a frame in time units
-		A_long time_shift = in_data->time_step / 2;
-
-		// Create a new time value with the shift applied
-		A_Time shifted_time;
-		shifted_time.value = in_data->current_time + time_shift;
-		shifted_time.scale = in_data->time_scale;
-
-		// Convert to seconds for the calculation
-		current_time = (PF_FpLong)shifted_time.value / (PF_FpLong)shifted_time.scale;
-	}
-
-	if (!err) {
+	if (renderData) {
 		ERR((extraP->cb->checkout_layer_pixels(in_data->effect_ref, RANDOMMOVE_INPUT, &input_worldP)));
 		ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
 
-		if (!err && input_worldP && output_worldP) {
-			AEFX_SuiteScoper<PF_WorldSuite2> world_suite = AEFX_SuiteScoper<PF_WorldSuite2>(in_data,
-				kPFWorldSuite,
-				kPFWorldSuiteVersion2,
-				out_data);
+		AEFX_SuiteScoper<PF_WorldSuite2> world_suite = AEFX_SuiteScoper<PF_WorldSuite2>(in_data,
+			kPFWorldSuite,
+			kPFWorldSuiteVersion2,
+			out_data);
+		PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
+		ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
-			PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
-			ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
-
-			if (isGPU) {
-				ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, &info, current_time));
-			}
-			else {
-				ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, &info, current_time));
-			}
+		if (isGPU) {
+			ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, &renderData->info, renderData->current_time));
 		}
-	}
-
-	// Check in the input layer pixels
-	if (input_worldP) {
+		else {
+			ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, &renderData->info, renderData->current_time));
+		}
 		ERR2(extraP->cb->checkin_layer_pixels(in_data->effect_ref, RANDOMMOVE_INPUT));
 	}
-
+	else {
+		return PF_Err_INTERNAL_STRUCT_DAMAGED;
+	}
 	return err;
 }
 
@@ -1300,8 +1435,6 @@ Render(
 {
 	PF_Err err = PF_Err_NONE;
 
-	// This is a fallback for older versions that don't support Smart Render
-	// Get parameters for rendering
 	RandomMoveInfo info;
 	AEFX_CLR_STRUCT(info);
 
@@ -1312,91 +1445,90 @@ Render(
 	info.wave_type = params[WAVE_TYPE_SLIDER]->u.pd.value - 1;
 	info.phase = params[PHASE_SLIDER]->u.fs_d.value;
 
-	// Get tiling parameters
 	info.x_tiles = params[X_TILES_DISK_ID]->u.bd.value;
 	info.y_tiles = params[Y_TILES_DISK_ID]->u.bd.value;
 	info.mirror = params[MIRROR_DISK_ID]->u.bd.value;
 
-	// Check if there are any frequency keyframes
 	bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
 
-	// Convert current time to seconds for wave calculations
+	AEGP_LayerIDVal layer_id = 0;
+	AEGP_SuiteHandler suites(in_data->pica_basicP);
+	AEGP_LayerH layer = NULL;
+
+	if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+		err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
+
+		if (!err && layer) {
+			err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
+		}
+	}
+
 	PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
 
-	// If there are any frequency keyframes, always advance time by half a frame
+	PF_FpLong layer_time_offset = 0;
+	if (layer_id != 0 && layer != NULL) {
+		A_Time in_point;
+		err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_CompTime, &in_point);
+
+		if (!err) {
+			layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
+		}
+
+		current_time -= layer_time_offset;
+	}
+
 	if (has_frequency_keyframes) {
-		// Shift by half a frame in time units
 		A_long time_shift = in_data->time_step / 2;
 
-		// Create a new time value with the shift applied
 		A_Time shifted_time;
 		shifted_time.value = in_data->current_time + time_shift;
 		shifted_time.scale = in_data->time_scale;
 
-		// Convert to seconds for the calculation
 		current_time = (PF_FpLong)shifted_time.value / (PF_FpLong)shifted_time.scale;
+
+		if (layer_id != 0) {
+			current_time -= layer_time_offset;
+		}
 	}
 
-	// Calculate angle in radians for direction vector
 	PF_FpLong angleRad = info.angle * M_PI / 180.0;
 	PF_FpLong dx = cos(angleRad);
 	PF_FpLong dy = sin(angleRad);
 
-	// Calculate wave value based on time, frequency and phase
-	PF_FpLong X;
-	PF_FpLong m;
+	PF_FpLong m = CalculateWaveValue(info.wave_type,
+		info.frequency,
+		current_time,
+		info.phase);
 
-	// Calculate wave value (sine or triangle)
-	if (info.wave_type == 0) {
-		// Sine wave
-		X = (info.frequency * 2.0 * current_time) + (info.phase * 2.0);
-		m = sin(X * M_PI);
-	}
-	else {
-		// Triangle wave
-		X = ((info.frequency * 2.0 * current_time) + (info.phase * 2.0)) / 2.0 + info.phase;
-		m = TriangleWave(X);
-	}
-
-	// Initialize transformation values
 	PF_FpLong offsetX = 0, offsetY = 0;
 	PF_FpLong scale = 100.0;
 
-	// Apply effect based on direction mode
 	switch (info.direction) {
-	case 0: // Angle mode - position offset only
+	case 0:       
 		offsetX = dx * info.magnitude * m;
 		offsetY = dy * info.magnitude * m;
 		break;
 
-	case 1: // Depth mode - scale only
+	case 1:      
 		scale = 100.0 - (info.magnitude * m * 0.1);
 		break;
 
-	case 2: { // Orbit mode - position offset and scale
+	case 2: {        
 		offsetX = dx * info.magnitude * m;
 		offsetY = dy * info.magnitude * m;
 
-		// Calculate second wave with phase shift for scale
 		PF_FpLong phaseShift = info.wave_type == 0 ? 0.25 : 0.125;
-		PF_FpLong X2;
+		m = CalculateWaveValue(info.wave_type,
+			info.frequency,
+			current_time,
+			info.phase + phaseShift);
 
-		if (info.wave_type == 0) {
-			X2 = (info.frequency * 2.0 * current_time) + ((info.phase + phaseShift) * 2.0);
-			m = sin(X2 * M_PI);
-		}
-		else {
-			X2 = ((info.frequency * 2.0 * current_time) + ((info.phase + phaseShift) * 2.0)) / 2.0 + (info.phase + phaseShift);
-			m = TriangleWave(X2);
-		}
 		scale = 100.0 - (info.magnitude * m * 0.1);
 		break;
 	}
 	}
 
-	// Get pixel format using PF_WorldSuite
 	PF_PixelFormat pixelFormat;
-	AEGP_SuiteHandler suites(in_data->pica_basicP);
 	PF_WorldSuite2* wsP = NULL;
 	ERR(suites.Pica()->AcquireSuite(kPFWorldSuite, kPFWorldSuiteVersion2, (const void**)&wsP));
 	if (!err) {
@@ -1404,36 +1536,29 @@ Render(
 		suites.Pica()->ReleaseSuite(kPFWorldSuite, kPFWorldSuiteVersion2);
 	}
 
-	// Iterate through all pixels in the output buffer
 	A_long width = output->width;
 	A_long height = output->height;
 	A_long input_width = params[RANDOMMOVE_INPUT]->u.ld.width;
 	A_long input_height = params[RANDOMMOVE_INPUT]->u.ld.height;
 	A_long rowbytes = params[RANDOMMOVE_INPUT]->u.ld.rowbytes;
 
-	// Calculate center point
 	PF_FpLong centerX = (width / 2.0);
 	PF_FpLong centerY = (height / 2.0);
 	PF_FpLong inputCenterX = (input_width / 2.0);
 	PF_FpLong inputCenterY = (input_height / 2.0);
 
-	// Calculate scale factor
 	PF_FpLong scaleFactorX = 100.0 / scale;
 	PF_FpLong scaleFactorY = 100.0 / scale;
 
-	// Process based on pixel format
 	switch (pixelFormat) {
 	case PF_PixelFormat_ARGB128: {
-		// 32-bit float processing
 		for (A_long y = 0; y < height; y++) {
 			PF_PixelFloat* outP = (PF_PixelFloat*)((char*)output->data + y * output->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_PixelFloat>(
 					(PF_PixelFloat*)params[RANDOMMOVE_INPUT]->u.ld.data,
 					srcX, srcY,
@@ -1448,16 +1573,13 @@ Render(
 		break;
 	}
 	case PF_PixelFormat_ARGB64: {
-		// 16-bit processing
 		for (A_long y = 0; y < height; y++) {
 			PF_Pixel16* outP = (PF_Pixel16*)((char*)output->data + y * output->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_Pixel16>(
 					(PF_Pixel16*)params[RANDOMMOVE_INPUT]->u.ld.data,
 					srcX, srcY,
@@ -1473,16 +1595,13 @@ Render(
 	}
 	case PF_PixelFormat_ARGB32:
 	default: {
-		// 8-bit processing
 		for (A_long y = 0; y < height; y++) {
 			PF_Pixel8* outP = (PF_Pixel8*)((char*)output->data + y * output->rowbytes);
 
 			for (A_long x = 0; x < width; x++, outP++) {
-				// Calculate source coordinates with transformation
 				PF_FpLong srcX = (x - centerX) * scaleFactorX + inputCenterX - offsetX;
 				PF_FpLong srcY = (y - centerY) * scaleFactorY + inputCenterY - offsetY;
 
-				// Sample from the input with tiling
 				*outP = SampleBilinear<PF_Pixel8>(
 					(PF_Pixel8*)params[RANDOMMOVE_INPUT]->u.ld.data,
 					srcX, srcY,
@@ -1501,6 +1620,7 @@ Render(
 	return err;
 }
 
+
 extern "C" DllExport
 PF_Err PluginDataEntryFunction(
 	PF_PluginDataPtr inPtr,
@@ -1511,13 +1631,12 @@ PF_Err PluginDataEntryFunction(
 {
 	PF_Err result = PF_Err_INVALID_CALLBACK;
 
-	// Register the effect with After Effects
 	result = PF_REGISTER_EFFECT(
 		inPtr,
 		inPluginDataCallBackPtr,
-		"Oscillate",          // Effect name
-		"DKT Oscillate",      // Match name - make sure this is unique
-		"DKT Effects",    // Category
+		"Oscillate",            
+		"DKT Oscillate",              
+		"DKT Effects",     
 		AE_RESERVED_INFO
 	);
 
@@ -1545,6 +1664,9 @@ PF_Err EffectMain(
 		case PF_Cmd_PARAMS_SETUP:
 			err = ParamsSetup(in_data, out_data, params, output);
 			break;
+		case PF_Cmd_USER_CHANGED_PARAM:
+			err = UserChangedParam(in_data, out_data, params, output, (PF_UserChangedParamExtra*)extra);
+			break;
 		case PF_Cmd_SMART_PRE_RENDER:
 			err = SmartPreRender(in_data, out_data, (PF_PreRenderExtra*)extra);
 			break;
@@ -1555,12 +1677,7 @@ PF_Err EffectMain(
 			err = SmartRender(in_data, out_data, (PF_SmartRenderExtra*)extra, true);
 			break;
 		case PF_Cmd_RENDER:
-			// Fallback for older versions that don't support Smart Render
 			err = Render(in_data, out_data, params, output);
-			break;
-		case PF_Cmd_USER_CHANGED_PARAM:
-		case PF_Cmd_UPDATE_PARAMS_UI:
-			err = UpdateParameterUI(in_data, out_data, params);
 			break;
 		case PF_Cmd_GPU_DEVICE_SETUP:
 			err = GPUDeviceSetup(in_data, out_data, (PF_GPUDeviceSetupExtra*)extra);
@@ -1579,5 +1696,3 @@ PF_Err EffectMain(
 
 	return err;
 }
-
-

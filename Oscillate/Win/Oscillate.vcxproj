@@ -109,7 +109,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MSWindows;WIN32;_DEBUG;_WINDOWS;HAS_CUDA;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>MSWindows;WIN32;_DEBUG;_WINDOWS;HAS_CUDA;CL_TARGET_OPENCL_VERSION=120;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <StructMemberAlignment>
       </StructMemberAlignment>
@@ -127,6 +127,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CompileAs>Default</CompileAs>
+      <LanguageStandard>Default</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -165,7 +166,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <AdditionalIncludeDirectories>..\..\..\Headers;..\..\..\Headers\SP;..\..\..\Headers\Win;..\..\..\Resources;..\..\..\Util;..\..\..\GPUUtils;$(BOOST_BASE_PATH)\;$(CUDA_SDK_BASE_PATH)\include\;$(IntDir)PreprocessedOpenCL</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>MSWindows;WIN32;_WINDOWS;HAS_CUDA;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>MSWindows;WIN32;_WINDOWS;HAS_CUDA;CL_TARGET_OPENCL_VERSION=120;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <StructMemberAlignment>
       </StructMemberAlignment>
@@ -183,6 +184,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <CompileAs>Default</CompileAs>
+      <LanguageStandard>Default</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -319,6 +321,8 @@
   <ItemGroup>
     <ClInclude Include="..\..\..\Headers\AEFX_SuiteHandlerTemplate.h" />
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h" />
+    <ClInclude Include="..\..\..\Util\AEFX_ArbParseHelper.h" />
+    <ClInclude Include="..\..\..\Util\AEFX_SuiteHelper.h" />
     <ClInclude Include="..\Oscillate.h" />
     <ClInclude Include="..\..\..\Util\Smart_Utils.h" />
     <ClInclude Include="..\..\..\Util\String_Utils.h" />
@@ -346,6 +350,8 @@
     <ClInclude Include="..\..\..\Headers\PrSDKPixelFormat.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\Util\AEFX_ArbParseHelper.c" />
+    <ClCompile Include="..\..\..\Util\AEFX_SuiteHelper.c" />
     <ClCompile Include="..\..\..\Util\DirectXUtils.cpp" />
     <ClCompile Include="..\..\..\Util\Smart_Utils.cpp" />
     <ClCompile Include="..\AEGP_SuiteHandler_MF.cpp" />

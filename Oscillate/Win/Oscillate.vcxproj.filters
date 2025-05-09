@@ -98,6 +98,12 @@
     <ClInclude Include="..\..\..\Util\DirectXUtils.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\Util\AEFX_ArbParseHelper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\Util\AEFX_SuiteHelper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\Util\Smart_Utils.cpp">
@@ -108,6 +114,8 @@
       <Filter>Supporting code</Filter>
     </ClCompile>
     <ClCompile Include="..\AEGP_SuiteHandler_MF.cpp" />
+    <ClCompile Include="..\..\..\Util\AEFX_ArbParseHelper.c" />
+    <ClCompile Include="..\..\..\Util\AEFX_SuiteHelper.c" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\OscillateKernel.cu" />

@@ -9,6 +9,7 @@
 #include "PrSDKAESupport.h"
 #include "AE_Effect.h"
 #include "AE_EffectCB.h"
+#include "AE_EffectSuites.h"
 #include "AE_EffectCBSuites.h"
 #include "AE_EffectGPUSuites.h"
 #include "AE_Macros.h"
@@ -44,7 +45,6 @@
 #define	STAGE_VERSION	PF_Stage_DEVELOP
 #define	BUILD_VERSION	1
 
-/* Parameter defaults */
 #define ANGLE_MIN       -3600.0
 #define ANGLE_MAX       3600.0
 #define ANGLE_DFLT      45.0
@@ -63,17 +63,25 @@
 
 enum {
     RANDOMMOVE_INPUT = 0,
+    NORMAL_CHECKBOX_ID,     
     DIRECTION_SLIDER,
     ANGLE_SLIDER,
     FREQUENCY_SLIDER,
     MAGNITUDE_SLIDER,
     WAVE_TYPE_SLIDER,
     PHASE_SLIDER,
-    TILES_GROUP,        // Group start
+    TILES_GROUP,              
     X_TILES_DISK_ID,
     Y_TILES_DISK_ID,
     MIRROR_DISK_ID,
-    TILES_GROUP_END,    // Group end
+    TILES_GROUP_END,          
+    COMPATIBILITY_GROUP,       
+    COMPATIBILITY_CHECKBOX_ID,
+    COMPATIBILITY_ANGLE_DISK_ID,
+    COMPATIBILITY_FREQUENCY_DISK_ID,
+    COMPATIBILITY_MAGNITUDE_DISK_ID,
+    COMPATIBILITY_WAVE_TYPE_DISK_ID,
+    COMPATIBILITY_GROUP_END,    
     RANDOMMOVE_NUM_PARAMS
 };
 
@@ -84,9 +92,15 @@ typedef struct RandomMoveInfo {
     PF_FpLong magnitude;
     A_long    wave_type;
     PF_FpLong phase;
-    PF_Boolean x_tiles;    // X tiling parameter
-    PF_Boolean y_tiles;    // Y tiling parameter
-    PF_Boolean mirror;     // Mirror parameter
+    PF_Boolean x_tiles;    
+    PF_Boolean y_tiles;    
+    PF_Boolean mirror;     
+    PF_Boolean normal;     
+    PF_Boolean compatibility; 
+    PF_FpLong compat_angle;
+    PF_FpLong compat_frequency;
+    PF_FpLong compat_magnitude;
+    A_long    compat_wave_type;
 } RandomMoveInfo;
 
 extern "C" {
@@ -102,10 +116,6 @@ extern "C" {
 }
 
 #if HAS_METAL
-/*
- ** Plugins must not rely on a host autorelease pool.
- ** Create a pool if autorelease is used, or Cocoa convention calls, such as Metal, might internally autorelease.
- */
 struct ScopedAutoreleasePool
 {
     ScopedAutoreleasePool()
@@ -124,10 +134,15 @@ struct ScopedAutoreleasePool
 
 typedef struct {
     RandomMoveInfo info;
-    PF_FpLong current_time;
     PF_InData* in_data;
     PF_EffectWorld* input_worldP;
     PF_EffectWorld* output_worldP;
 } ThreadRenderData;
 
-#endif // Oscillate_H
+typedef struct {
+    RandomMoveInfo info;
+    PF_FpLong layer_start_seconds;
+    PF_FpLong current_time;
+} OscillateRenderData;
+
+#endif  
