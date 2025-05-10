@@ -1,1 +1,0 @@
-#include "AutoShakeKernel.cu"
