@@ -118,24 +118,22 @@ ParamsSetup(
 	def.param_type = PF_Param_FLOAT_SLIDER;
 	PF_STRCPY(def.name, "Scale");
 	def.flags = 0;
-	def.u.fs_d.valid_min = 0.0f;       // Minimum value: 0%
-	def.u.fs_d.valid_max = 1000.0f;    // Maximum value: 1000%
-	def.u.fs_d.slider_min = 0.0f;      // Slider minimum: 0%
-	def.u.fs_d.slider_max = 500.0f;    // Slider maximum: 500%
-	def.u.fs_d.value = 100.0f;         // Default value: 100%
-	def.u.fs_d.dephault = 100.0f;      // Default value: 100%
-	def.u.fs_d.precision = 1;          // Show one decimal place
+	def.u.fs_d.valid_min = 0.0f;          
+	def.u.fs_d.valid_max = 1000.0f;       
+	def.u.fs_d.slider_min = 0.0f;         
+	def.u.fs_d.slider_max = 500.0f;       
+	def.u.fs_d.value = 100.0f;            
+	def.u.fs_d.dephault = 100.0f;         
+	def.u.fs_d.precision = 1;              
 	def.u.fs_d.display_flags = 0;
 	PF_ADD_PARAM(in_data, -1, &def);
 
-	// Add a group for the tiling options
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_START;
 	PF_STRCPY(def.name, "Tiles");
 	def.flags = PF_ParamFlag_START_COLLAPSED;
 	PF_ADD_PARAM(in_data, -1, &def);
 
-	// Add X Tiles checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("X Tiles",
 		"",
@@ -143,7 +141,6 @@ ParamsSetup(
 		0,
 		X_TILES_DISK_ID);
 
-	// Add Y Tiles checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("Y Tiles",
 		"",
@@ -151,7 +148,6 @@ ParamsSetup(
 		0,
 		Y_TILES_DISK_ID);
 
-	// Add Mirror checkbox
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_CHECKBOX("Mirror",
 		"",
@@ -159,7 +155,6 @@ ParamsSetup(
 		0,
 		MIRROR_DISK_ID);
 
-	// Close the group
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_END;
 	PF_ADD_PARAM(in_data, -1, &def);
@@ -382,8 +377,6 @@ GPUDeviceSetdown(
 		PF_Handle gpu_dataH = (PF_Handle)extraP->input->gpu_data;
 		MetalGPUData* metal_dataP = reinterpret_cast<MetalGPUData*>(*gpu_dataH);
 
-		// Metal objects will be released automatically when the pool is released
-
 		AEFX_SuiteScoper<PF_HandleSuite1> handle_suite = AEFX_SuiteScoper<PF_HandleSuite1>(in_dataP,
 			kPFHandleSuite,
 			kPFHandleSuiteVersion1,
@@ -413,23 +406,19 @@ PixelT SampleBilinear(
 	int width = input->width;
 	int height = input->height;
 
-	// Apply tiling to x-coordinate
 	if (x_tiles) {
 		if (mirror) {
-			// Mirror tiling - flip every other tile
 			float intPartX;
 			float fracPartX = modff(fabsf(x / width), &intPartX);
 			int isOddX = (int)intPartX & 1;
 			x = isOddX ? (1.0f - fracPartX) * width : fracPartX * width;
 		}
 		else {
-			// Regular tiling
 			x = fmodf(x, (float)width);
 			if (x < 0) x += width;
 		}
 	}
 	else if (x < 0 || x >= width) {
-		// Return transparent pixel if outside bounds and not tiling
 		PixelT transparent;
 		if constexpr (std::is_same_v<PixelT, PF_Pixel8>) {
 			transparent.alpha = 0;
@@ -452,23 +441,19 @@ PixelT SampleBilinear(
 		return transparent;
 	}
 
-	// Apply tiling to y-coordinate
 	if (y_tiles) {
 		if (mirror) {
-			// Mirror tiling - flip every other tile
 			float intPartY;
 			float fracPartY = modff(fabsf(y / height), &intPartY);
 			int isOddY = (int)intPartY & 1;
 			y = isOddY ? (1.0f - fracPartY) * height : fracPartY * height;
 		}
 		else {
-			// Regular tiling
 			y = fmodf(y, (float)height);
 			if (y < 0) y += height;
 		}
 	}
 	else if (y < 0 || y >= height) {
-		// Return transparent pixel if outside bounds and not tiling
 		PixelT transparent;
 		if constexpr (std::is_same_v<PixelT, PF_Pixel8>) {
 			transparent.alpha = 0;
@@ -630,10 +615,9 @@ TransformFunc(
 	float x_pos = static_cast<float>(tiP->x_pos) / 65536.0f;
 	float y_pos = static_cast<float>(tiP->y_pos) / 65536.0f;
 
-	// Reverse rotation by negating the angle
 	float rotation_radians = -static_cast<float>(tiP->rotation) / 65536.0f * 3.14159265358979323846f / 180.0f;
 
-	float scale = static_cast<float>(tiP->scale) / 100.0f; // Convert from percentage to scale factor
+	float scale = static_cast<float>(tiP->scale) / 100.0f;       
 
 	float center_x = input->width / 2.0f;
 	float center_y = input->height / 2.0f;
@@ -644,7 +628,6 @@ TransformFunc(
 	float dx = curr_x - x_pos;
 	float dy = curr_y - y_pos;
 
-	// Apply scaling (divide by scale to invert the transform)
 	dx /= scale;
 	dy /= scale;
 
@@ -656,7 +639,6 @@ TransformFunc(
 	float src_x = rotated_x + center_x;
 	float src_y = rotated_y + center_y;
 
-	// Pass tiling parameters to SampleBilinear
 	*outP = SampleBilinear<PixelT>(input, src_x, src_y, tiP->x_tiles, tiP->y_tiles, tiP->mirror);
 
 	return err;
