@@ -130,6 +130,12 @@ struct ThreadRenderData {
     void* input_data;
     A_long input_rowbytes;
     PF_FpLong current_time;
+    PF_FpLong prev_time;
+    PF_FpLong duration;
+    PF_FpLong layer_start_seconds;
+    PF_FpLong accumulated_phase;
+    bool accumulated_phase_initialized;
+    bool has_frequency_keyframes;
 };
 
 

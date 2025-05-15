@@ -291,16 +291,18 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
     ((int)(inYTiles))
     ((int)(inMirror))
     ((float)(inCurrentTime))
-    ((float)(inDownsampleX))      
-    ((float)(inDownsampleY))      
-    ((int)(inNormalMode))         
-    ((int)(inCompatibilityMode))     
-    ((float)(inCompatibilityMagnitude))    
+    ((float)(inDownsampleX))
+    ((float)(inDownsampleY))
+    ((int)(inNormalMode))
+    ((int)(inCompatibilityMode))
+    ((float)(inCompatibilityMagnitude))
     ((float)(inCompatibilitySpeed))
     ((float)(inCompatibilityEvolution))
     ((float)(inCompatibilitySeed))
     ((float)(inCompatibilityAngle))
-    ((float)(inCompatibilitySlack)),
+    ((float)(inCompatibilitySlack))
+    ((float)(inAccumulatedPhase))  // New parameter for accumulated phase
+    ((int)(inHasFrequencyKeyframes)),  // New parameter for keyframe flag
     ((uint2)(inXY)(KERNEL_XY)))
 {
     if (inXY.x < inWidth && inXY.y < inHeight)
@@ -321,7 +323,13 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
             s = sin(angleRad);
             c = cos(angleRad);
 
-            evolutionValue = inEvolution - inFrequency * inCurrentTime;
+            // Use accumulated phase if available, otherwise use traditional calculation
+            if (inHasFrequencyKeyframes != 0) {
+                evolutionValue = inEvolution - inAccumulatedPhase;
+            }
+            else {
+                evolutionValue = inEvolution - inFrequency * inCurrentTime;
+            }
 
             dx = simplex_noise(evolutionValue, inSeed * 49235.319798f, 0.0f);
             dy = simplex_noise(evolutionValue + 7468.329f, inSeed * 19337.940385f, 0.0f);
@@ -347,7 +355,7 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
 
             dx *= inCompatibilityMagnitude * inDownsampleX;
             dy *= inCompatibilityMagnitude * inCompatibilitySlack * inDownsampleY;
-            dz = 0.0f;       
+            dz = 0.0f;
         }
 
         dz = -dz;
@@ -491,7 +499,9 @@ void AutoShake_CUDA(
     float compatibility_evolution,
     float compatibility_seed,
     float compatibility_angle,
-    float compatibility_slack)
+    float compatibility_slack,
+    float accumulated_phase,
+    int has_frequency_keyframes)
 {
     dim3 blockDim(16, 16, 1);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
@@ -501,7 +511,8 @@ void AutoShake_CUDA(
         magnitude, frequency, evolution, seed, angle, slack, zshake,
         x_tiles, y_tiles, mirror, currentTime, downsample_x, downsample_y,
         normal_mode, compatibility_mode, compatibility_magnitude, compatibility_speed,
-        compatibility_evolution, compatibility_seed, compatibility_angle, compatibility_slack);
+        compatibility_evolution, compatibility_seed, compatibility_angle, compatibility_slack,
+        accumulated_phase, has_frequency_keyframes);
 
     cudaDeviceSynchronize();
 }

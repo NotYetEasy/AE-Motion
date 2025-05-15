@@ -50,7 +50,9 @@ extern void AutoShake_CUDA(
 	float compatibility_evolution,
 	float compatibility_seed,
 	float compatibility_angle,
-	float compatibility_slack);
+	float compatibility_slack,
+	float accumulated_phase,
+	int has_frequency_keyframes);
 
 
 static PF_Err
@@ -366,6 +368,139 @@ bool HasAnyFrequencyKeyframes(PF_InData* in_data)
 
 	return has_keyframes;
 }
+
+
+PF_Err valueAtTime(
+	PF_InData* in_data,
+	int stream_index,
+	float time_secs,
+	PF_FpLong* value_out)
+{
+	PF_Err err = PF_Err_NONE;
+
+	AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+	AEGP_EffectRefH aegp_effect_ref = NULL;
+	AEGP_StreamRefH stream_ref = NULL;
+
+	A_Time time;
+	time.value = (A_long)(time_secs * in_data->time_scale);
+	time.scale = in_data->time_scale;
+
+	if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+		err = suites.PFInterfaceSuite1()->AEGP_GetNewEffectForEffect(
+			NULL,
+			in_data->effect_ref,
+			&aegp_effect_ref);
+
+		if (!err && aegp_effect_ref) {
+			err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+				NULL,
+				aegp_effect_ref,
+				stream_index,
+				&stream_ref);
+
+			if (!err && stream_ref) {
+				AEGP_StreamValue2 stream_value;
+				err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+					NULL,
+					stream_ref,
+					AEGP_LTimeMode_LayerTime,
+					&time,
+					FALSE,
+					&stream_value);
+
+				if (!err) {
+					AEGP_StreamType stream_type;
+					err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
+
+					if (!err) {
+						switch (stream_type) {
+						case AEGP_StreamType_OneD:
+							*value_out = stream_value.val.one_d;
+							break;
+
+						case AEGP_StreamType_TwoD:
+						case AEGP_StreamType_TwoD_SPATIAL:
+							*value_out = stream_value.val.two_d.x;
+							break;
+
+						case AEGP_StreamType_ThreeD:
+						case AEGP_StreamType_ThreeD_SPATIAL:
+							*value_out = stream_value.val.three_d.x;
+							break;
+
+						case AEGP_StreamType_COLOR:
+							*value_out = stream_value.val.color.redF;
+							break;
+
+						default:
+							err = PF_Err_BAD_CALLBACK_PARAM;
+							break;
+						}
+					}
+
+					suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+				}
+
+				suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+			}
+
+			suites.EffectSuite4()->AEGP_DisposeEffect(aegp_effect_ref);
+		}
+	}
+
+	return err;
+}
+
+static PF_Err
+valueAtTimeHz(
+	PF_InData* in_data,
+	int stream_index,
+	float time_secs,
+	float duration,
+	ThreadRenderData* renderData,
+	PF_FpLong* value_out)
+{
+	PF_Err err = PF_Err_NONE;
+
+	err = valueAtTime(in_data, stream_index, time_secs, value_out);
+	if (err) return err;
+
+	if (stream_index == AUTOSHAKE_FREQUENCY) {
+		bool isKeyed = HasAnyFrequencyKeyframes(in_data);
+
+		bool isHz = true;
+
+		if (isHz && isKeyed) {
+			float fps = 120.0f;
+			int totalSteps = (int)roundf(duration * fps);
+			int curSteps = (int)roundf(fps * time_secs);
+
+			// Initialize accumulated phase if needed
+			if (!renderData->accumulated_phase_initialized) {
+				renderData->accumulated_phase = 0.0f;
+				renderData->accumulated_phase_initialized = true;
+			}
+
+			if (curSteps >= 0) {
+				renderData->accumulated_phase = 0.0f;
+				for (int i = 0; i <= curSteps; i++) {
+					PF_FpLong stepValue;
+					err = valueAtTime(in_data, stream_index, i / fps, &stepValue);
+					if (err) return err;
+
+					renderData->accumulated_phase += stepValue / fps;
+				}
+
+				*value_out = renderData->accumulated_phase;
+			}
+		}
+	}
+
+	return err;
+}
+
 
 
 struct OpenCLGPUData
@@ -762,7 +897,13 @@ ProcessAutoShake(
 		s = sin(angleRad);
 		c = cos(angleRad);
 
-		evolutionValue = info->evolution + info->frequency * renderData->current_time;
+		// Use accumulated phase if available, otherwise use traditional calculation
+		if (renderData->has_frequency_keyframes && renderData->accumulated_phase_initialized) {
+			evolutionValue = info->evolution + renderData->accumulated_phase;
+		}
+		else {
+			evolutionValue = info->evolution + info->frequency * renderData->current_time;
+		}
 
 		dx = SimplexNoise::noise(evolutionValue, info->seed * 49235.319798);
 		dy = SimplexNoise::noise(evolutionValue + 7468.329, info->seed * 19337.940385);
@@ -788,7 +929,7 @@ ProcessAutoShake(
 
 		dx *= info->compatibility_magnitude;
 		dy *= info->compatibility_magnitude * info->compatibility_slack;
-		dz = 0;       
+		dz = 0;
 	}
 
 	dz = -dz;
@@ -1116,12 +1257,13 @@ PreRender(
 		if (!err) renderData->info.compatibility_slack = param_copy.u.fs_d.value;
 
 		bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
+		renderData->has_frequency_keyframes = has_frequency_keyframes;
 
 		AEGP_LayerIDVal layer_id = 0;
 		AEGP_SuiteHandler suites(in_data->pica_basicP);
 
 		PF_FpLong layer_time_offset = 0;
-		A_Ratio stretch_factor = { 1, 1 };      
+		A_Ratio stretch_factor = { 1, 1 };
 
 		if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
 			AEGP_LayerH layer = NULL;
@@ -1131,42 +1273,47 @@ PreRender(
 			if (!err && layer) {
 				err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
 
-
 				A_Time in_point;
 				err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
 
 				if (!err) {
 					layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
+					renderData->layer_start_seconds = layer_time_offset;
 				}
 
 				err = suites.LayerSuite9()->AEGP_GetLayerStretch(layer, &stretch_factor);
 			}
 		}
 
-		A_long time_offset = 0;
-		if (has_frequency_keyframes) {
-			time_offset = in_data->time_step / 2;      
-		}
-
 		PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
+		PF_FpLong prev_time = current_time - ((PF_FpLong)in_data->time_step / (PF_FpLong)in_data->time_scale);
+		PF_FpLong duration = current_time;
 
 		PF_FpLong stretch_ratio = (PF_FpLong)stretch_factor.num / (PF_FpLong)stretch_factor.den;
 
-		if (has_frequency_keyframes) {
-			A_long time_shift = in_data->time_step / 2;
-
-			A_Time shifted_time;
-			shifted_time.value = in_data->current_time + time_shift;
-			shifted_time.scale = in_data->time_scale;
-
-			current_time = (PF_FpLong)shifted_time.value / (PF_FpLong)shifted_time.scale;
-		}
-
 		current_time -= layer_time_offset;
+		prev_time -= layer_time_offset;
+		duration -= layer_time_offset;
 
 		current_time *= stretch_ratio;
+		prev_time *= stretch_ratio;
+		duration *= stretch_ratio;
 
 		renderData->current_time = current_time;
+		renderData->prev_time = prev_time;
+		renderData->duration = duration;
+
+		renderData->accumulated_phase = 0.0f;
+		renderData->accumulated_phase_initialized = false;
+
+		if (has_frequency_keyframes && renderData->info.frequency > 0) {
+			PF_FpLong accumulated_phase;
+			err = valueAtTimeHz(in_data, AUTOSHAKE_FREQUENCY, current_time, duration, renderData, &accumulated_phase);
+			if (!err) {
+				renderData->accumulated_phase = accumulated_phase;
+				renderData->accumulated_phase_initialized = true;
+			}
+		}
 
 		extra->output->pre_render_data = renderData;
 		extra->output->delete_pre_render_data_func = DisposePreRenderData;
@@ -1184,15 +1331,15 @@ PreRender(
 			struct {
 				A_u_char has_frequency_keyframes;
 				A_long time_offset;
-				AEGP_LayerIDVal layer_id;        
-				A_Ratio stretch_factor;       
+				AEGP_LayerIDVal layer_id;
+				A_Ratio stretch_factor;
 				ShakeInfo info;
 			} detection_data;
 
 			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
-			detection_data.time_offset = time_offset;
-			detection_data.layer_id = layer_id;     
-			detection_data.stretch_factor = stretch_factor;     
+			detection_data.time_offset = 0; // No longer using time_offset for half-frame
+			detection_data.layer_id = layer_id;
+			detection_data.stretch_factor = stretch_factor;
 			detection_data.info = renderData->info;
 
 			ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
@@ -1208,6 +1355,7 @@ PreRender(
 
 	return err;
 }
+
 
 static size_t
 RoundUp(
@@ -1355,6 +1503,8 @@ typedef struct
 	float mCompatibilitySeed;
 	float mCompatibilityAngle;
 	float mCompatibilitySlack;
+	float mAccumulatedPhase;
+	int mHasFrequencyKeyframes;
 } AutoShakeParams;
 
 
@@ -1412,9 +1562,11 @@ SmartRenderGPU(
 	autoshake_params.mXTiles = renderData->info.x_tiles;
 	autoshake_params.mYTiles = renderData->info.y_tiles;
 	autoshake_params.mMirror = renderData->info.mirror;
-	autoshake_params.mCurrentTime = renderData->current_time;          
-	autoshake_params.mDownsampleX = downsample_factor_x;       
-	autoshake_params.mDownsampleY = downsample_factor_y;       
+	autoshake_params.mCurrentTime = renderData->current_time;
+	autoshake_params.mDownsampleX = downsample_factor_x;
+	autoshake_params.mDownsampleY = downsample_factor_y;
+	autoshake_params.mAccumulatedPhase = renderData->accumulated_phase;
+	autoshake_params.mHasFrequencyKeyframes = renderData->has_frequency_keyframes ? 1 : 0;
 
 	int normal_mode = renderData->info.normal_mode;
 	int compatibility_mode = renderData->info.compatibility_mode;
@@ -1464,6 +1616,8 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &compatibility_seed));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &compatibility_angle));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &compatibility_slack));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &autoshake_params.mAccumulatedPhase));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mHasFrequencyKeyframes));
 
 		size_t threadBlock[2] = { 16, 16 };
 		size_t grid[2] = { RoundUp(autoshake_params.mWidth, threadBlock[0]), RoundUp(autoshake_params.mHeight, threadBlock[1]) };
@@ -1509,7 +1663,9 @@ SmartRenderGPU(
 			compatibility_evolution,
 			compatibility_seed,
 			compatibility_angle,
-			compatibility_slack);
+			compatibility_slack,
+			autoshake_params.mAccumulatedPhase,
+			autoshake_params.mHasFrequencyKeyframes);
 
 		if (cudaPeekAtLastError() != cudaSuccess) {
 			err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -1549,6 +1705,8 @@ SmartRenderGPU(
 			float mCompatibilitySeed;
 			float mCompatibilityAngle;
 			float mCompatibilitySlack;
+			float mAccumulatedPhase;
+			int mHasFrequencyKeyframes;
 		} complete_params;
 
 		complete_params.mSrcPitch = autoshake_params.mSrcPitch;
@@ -1578,6 +1736,8 @@ SmartRenderGPU(
 		complete_params.mCompatibilitySeed = compatibility_seed;
 		complete_params.mCompatibilityAngle = compatibility_angle;
 		complete_params.mCompatibilitySlack = compatibility_slack;
+		complete_params.mAccumulatedPhase = autoshake_params.mAccumulatedPhase;
+		complete_params.mHasFrequencyKeyframes = autoshake_params.mHasFrequencyKeyframes;
 
 		DXShaderExecution shaderExecution(
 			dx_gpu_data->mContext,
@@ -1629,6 +1789,8 @@ SmartRenderGPU(
 			float mCompatibilitySeed;
 			float mCompatibilityAngle;
 			float mCompatibilitySlack;
+			float mAccumulatedPhase;
+			int mHasFrequencyKeyframes;
 		} metal_params;
 
 		metal_params.mSrcPitch = autoshake_params.mSrcPitch;
@@ -1658,6 +1820,8 @@ SmartRenderGPU(
 		metal_params.mCompatibilitySeed = compatibility_seed;
 		metal_params.mCompatibilityAngle = compatibility_angle;
 		metal_params.mCompatibilitySlack = compatibility_slack;
+		metal_params.mAccumulatedPhase = autoshake_params.mAccumulatedPhase;
+		metal_params.mHasFrequencyKeyframes = autoshake_params.mHasFrequencyKeyframes;
 
 		id<MTLDevice> device = (id<MTLDevice>)device_info.devicePV;
 		id<MTLBuffer> param_buffer = [[device newBufferWithBytes : &metal_params
