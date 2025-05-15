@@ -477,7 +477,7 @@ valueAtTimeHz(
 			int totalSteps = (int)roundf(duration * fps);
 			int curSteps = (int)roundf(fps * time_secs);
 
-			// Initialize accumulated phase if needed
+
 			if (!renderData->accumulated_phase_initialized) {
 				renderData->accumulated_phase = 0.0f;
 				renderData->accumulated_phase_initialized = true;
@@ -897,7 +897,7 @@ ProcessAutoShake(
 		s = sin(angleRad);
 		c = cos(angleRad);
 
-		// Use accumulated phase if available, otherwise use traditional calculation
+
 		if (renderData->has_frequency_keyframes && renderData->accumulated_phase_initialized) {
 			evolutionValue = info->evolution + renderData->accumulated_phase;
 		}
@@ -1337,7 +1337,7 @@ PreRender(
 			} detection_data;
 
 			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
-			detection_data.time_offset = 0; // No longer using time_offset for half-frame
+			detection_data.time_offset = 0; 
 			detection_data.layer_id = layer_id;
 			detection_data.stretch_factor = stretch_factor;
 			detection_data.info = renderData->info;
