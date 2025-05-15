@@ -370,6 +370,8 @@ static PF_FpLong TriangleWave(PF_FpLong t)
 }
 
 
+
+
 static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, double* motion_y, double* rotation_angle, double* scale_x, double* scale_y, float* scale_velocity_out) {
     AEGP_SuiteHandler suites(in_data->pica_basicP);
 
@@ -462,17 +464,17 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
 
 
         if (strstr(match_name, "DKT Oscillate")) {
-            A_long direction = 0;     
-            double angle = 45.0;       
+            A_long direction = 0;
+            double angle = 45.0;
             double frequency = 2.00;
             double magnitude = 25;
-            A_long wave_type = 0;    
+            A_long wave_type = 0;
             double phase = 0.00;
             bool has_frequency_keyframes = false;
-            bool has_phase_keyframes = false;     
+            bool has_phase_keyframes = false;
 
-            bool normal_enabled = true;           
-            bool compatibility_enabled = false;    
+            bool normal_enabled = true;
+            bool compatibility_enabled = false;
             double compat_angle = 0.0;
             double compat_frequency = 0.1;
             double compat_magnitude = 1.0;
@@ -498,7 +500,7 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             const int COMPATIBILITY_MAGNITUDE_PARAM = 17;
             const int COMPATIBILITY_WAVE_TYPE_PARAM = 18;
 
-            if (num_params < 19) {        
+            if (num_params < 19) {
                 suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
                 continue;
             }
@@ -541,7 +543,7 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
                     &current_time, FALSE, &value);
                 if (!err) {
-                    direction = (A_long)value.val.one_d - 1;       
+                    direction = (A_long)value.val.one_d - 1;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
@@ -599,7 +601,7 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
                     &current_time, FALSE, &value);
                 if (!err) {
-                    wave_type = (A_long)value.val.one_d - 1;       
+                    wave_type = (A_long)value.val.one_d - 1;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
@@ -671,7 +673,7 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
                         &current_time, FALSE, &value);
                     if (!err) {
-                        compat_wave_type = (A_long)value.val.one_d - 1;       
+                        compat_wave_type = (A_long)value.val.one_d - 1;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
@@ -682,18 +684,104 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             double current_time_secs = (double)current_time.value / (double)current_time.scale;
             double next_time_secs = (double)next_time.value / (double)next_time.scale;
 
-            if (has_frequency_keyframes && normal_enabled) {
-                double time_offset = (double)in_data->time_step / (double)in_data->time_scale / 2.0;
-                prev_time_secs += time_offset;
-                current_time_secs += time_offset;
-                next_time_secs += time_offset;
-            }
+            auto TriangleWave = [](double t) -> double {
+                t = fmod(t + 0.75, 1.0);
+                if (t < 0) t += 1.0;
+                return (fabs(t - 0.5) - 0.25) * 4.0;
+                };
+
+            auto valueAtTime = [&suites, effectH, FREQUENCY_PARAM, PHASE_PARAM](int stream_index, double time_secs, double time_scale) -> double {
+                PF_Err local_err = PF_Err_NONE;
+                double value_out = 0.0;
+
+                AEGP_StreamRefH stream_ref = NULL;
+                A_Time time;
+                time.value = (A_long)(time_secs * time_scale);
+                time.scale = (A_long)time_scale;
+
+                local_err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+                    NULL,
+                    effectH,
+                    stream_index,
+                    &stream_ref);
+
+                if (!local_err && stream_ref) {
+                    AEGP_StreamValue2 stream_value;
+                    local_err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                        NULL,
+                        stream_ref,
+                        AEGP_LTimeMode_LayerTime,
+                        &time,
+                        FALSE,
+                        &stream_value);
+
+                    if (!local_err) {
+                        AEGP_StreamType stream_type;
+                        local_err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
+
+                        if (!local_err) {
+                            switch (stream_type) {
+                            case AEGP_StreamType_OneD:
+                                value_out = stream_value.val.one_d;
+                                break;
+
+                            case AEGP_StreamType_TwoD:
+                            case AEGP_StreamType_TwoD_SPATIAL:
+                                value_out = stream_value.val.two_d.x;
+                                break;
+
+                            case AEGP_StreamType_ThreeD:
+                            case AEGP_StreamType_ThreeD_SPATIAL:
+                                value_out = stream_value.val.three_d.x;
+                                break;
+
+                            case AEGP_StreamType_COLOR:
+                                value_out = stream_value.val.color.redF;
+                                break;
+                            }
+                        }
+
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+                    }
+
+                    suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+                }
+
+                return value_out;
+                };
+
+            auto valueAtTimeHz = [&valueAtTime, &has_frequency_keyframes, FREQUENCY_PARAM](
+                int stream_index, double time_secs, double duration, double time_scale) -> double {
+
+                    double value_out = valueAtTime(stream_index, time_secs, time_scale);
+
+                    if (stream_index == FREQUENCY_PARAM && has_frequency_keyframes) {
+                        bool isHz = true;        
+
+                        if (isHz) {
+                            double accumulated_phase = 0.0;
+                            double fps = 120.0;    
+                            int totalSteps = (int)round(duration * fps);
+                            int curSteps = (int)round(fps * time_secs);
+
+                            if (curSteps >= 0) {
+                                for (int i = 0; i <= curSteps; i++) {
+                                    double stepValue = valueAtTime(stream_index, i / fps, time_scale);
+                                    accumulated_phase += stepValue / fps;
+                                }
+                                value_out = accumulated_phase;
+                            }
+                        }
+                    }
+
+                    return value_out;
+                };
 
             AEGP_LayerIDVal layer_id = 0;
             err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
 
             double layer_time_offset = 0;
-            A_Ratio stretch_factor = { 1, 1 };      
+            A_Ratio stretch_factor = { 1, 1 };
 
             if (!err && layer_id != 0) {
                 A_Time in_point;
@@ -719,12 +807,23 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             double current_offsetX = 0, current_offsetY = 0, current_scale = 100.0;
             double next_offsetX = 0, next_offsetY = 0, next_scale = 100.0;
 
+            double prev_accumulated_phase = 0.0;
+            double current_accumulated_phase = 0.0;
+            double next_accumulated_phase = 0.0;
+            double time_scale = current_time.scale;          
+
+            if (has_frequency_keyframes && normal_enabled) {
+                prev_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, prev_time_secs, prev_time_secs, time_scale);
+                current_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, current_time_secs, current_time_secs, time_scale);
+                next_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, next_time_secs, next_time_secs, time_scale);
+            }
+
             if (compatibility_enabled) {
                 double compatAngleRad = compat_angle * M_PI / 180.0;
-                double compat_dx = sin(compatAngleRad);      
-                double compat_dy = cos(compatAngleRad);      
+                double compat_dx = sin(compatAngleRad);
+                double compat_dy = cos(compatAngleRad);
 
-                auto calculateCompatWaveValue = [](int wave_type, double frequency, double time) -> double {
+                auto calculateCompatWaveValue = [&TriangleWave](int wave_type, double frequency, double time) -> double {
                     double m;
                     if (wave_type == 0) {
                         m = sin(time * frequency * 3.14159);
@@ -754,118 +853,135 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 double dx = cos(angleRad);
                 double dy = sin(angleRad);
 
-                auto calculateWaveValue = [](int wave_type, double frequency, double time, double phase) -> double {
+                auto calculateWaveValue = [&TriangleWave](int wave_type, double frequency, double time, double phase, double accumulated_phase = 0.0) -> double {
                     double X, m;
 
-                    if (wave_type == 0) {
-                        X = (frequency * 2.0 * time) + (phase * 2.0);
-                        m = sin(X * M_PI);
+                    if (accumulated_phase > 0.0) {
+                        if (wave_type == 0) {
+                            X = ((accumulated_phase * 2.0 + phase * 2.0) * 3.14159);
+                            m = sin(X);
+                        }
+                        else {
+                            X = ((accumulated_phase * 2.0) + (phase * 2.0)) / 2.0 + phase;
+                            m = TriangleWave(X);
+                        }
                     }
                     else {
-                        X = ((frequency * 2.0 * time) + (phase * 2.0)) / 2.0 + phase;
-
-                        double t = fmod(X + 0.75, 1.0);
-                        if (t < 0) t += 1.0;
-                        m = (fabs(t - 0.5) - 0.25) * 4.0;
+                        if (wave_type == 0) {
+                            X = (frequency * 2.0 * time) + (phase * 2.0);
+                            m = sin(X * M_PI);
+                        }
+                        else {
+                            X = ((frequency * 2.0 * time) + (phase * 2.0)) / 2.0 + phase;
+                            m = TriangleWave(X);
+                        }
                     }
 
                     return m;
                     };
 
-                double prev_wave = calculateWaveValue(wave_type, frequency, prev_time_secs, phase);
-                double current_wave = calculateWaveValue(wave_type, frequency, current_time_secs, phase);
-                double next_wave = calculateWaveValue(wave_type, frequency, next_time_secs, phase);
-
                 double prev_phase = phase;
                 double next_phase = phase;
 
                 if (has_phase_keyframes) {
-                    streamH = NULL;
-                    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
-                    if (!err && streamH) {
-                        AEGP_StreamValue2 value;
-                        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                            &prev_time, FALSE, &value);
-                        if (!err) {
-                            prev_phase = value.val.one_d;
-                            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                        }
+                    prev_phase = valueAtTime(PHASE_PARAM, prev_time_secs, time_scale);
+                    next_phase = valueAtTime(PHASE_PARAM, next_time_secs, time_scale);
+                }
 
-                        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                            &next_time, FALSE, &value);
-                        if (!err) {
-                            next_phase = value.val.one_d;
-                            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                        }
+                double prev_wave;
+                double current_wave;
+                double next_wave;
 
-                        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                    }
-
-                    if (frequency == 0) {
-                        prev_wave = calculateWaveValue(wave_type, 0, 0, prev_phase);
-                        current_wave = calculateWaveValue(wave_type, 0, 0, phase);
-                        next_wave = calculateWaveValue(wave_type, 0, 0, next_phase);
-                    }
+                if (has_frequency_keyframes) {
+                    prev_wave = calculateWaveValue(wave_type, 0, 0, prev_phase, prev_accumulated_phase);
+                    current_wave = calculateWaveValue(wave_type, 0, 0, phase, current_accumulated_phase);
+                    next_wave = calculateWaveValue(wave_type, 0, 0, next_phase, next_accumulated_phase);
+                }
+                else {
+                    prev_wave = calculateWaveValue(wave_type, frequency, prev_time_secs, prev_phase);
+                    current_wave = calculateWaveValue(wave_type, frequency, current_time_secs, phase);
+                    next_wave = calculateWaveValue(wave_type, frequency, next_time_secs, next_phase);
                 }
 
                 switch (direction) {
-                case 0:       
+                case 0:
                     prev_offsetX = dx * magnitude * prev_wave;
                     prev_offsetY = dy * magnitude * prev_wave;
                     break;
 
-                case 1:      
+                case 1:
                     prev_scale = 100.0 + (magnitude * prev_wave * 0.1);
                     break;
 
-                case 2: {        
+                case 2: {
                     prev_offsetX = dx * magnitude * prev_wave;
                     prev_offsetY = dy * magnitude * prev_wave;
 
                     double phaseShift = wave_type == 0 ? 0.25 : 0.125;
-                    double m_scale = calculateWaveValue(wave_type, frequency, prev_time_secs, phase + phaseShift);
+                    double m_scale;
+
+                    if (has_frequency_keyframes) {
+                        m_scale = calculateWaveValue(wave_type, 0, 0, prev_phase + phaseShift, prev_accumulated_phase);
+                    }
+                    else {
+                        m_scale = calculateWaveValue(wave_type, frequency, prev_time_secs, prev_phase + phaseShift);
+                    }
                     prev_scale = 100.0 + (magnitude * m_scale * 0.1);
                     break;
                 }
                 }
 
                 switch (direction) {
-                case 0:       
+                case 0:
                     current_offsetX = dx * magnitude * current_wave;
                     current_offsetY = dy * magnitude * current_wave;
                     break;
 
-                case 1:      
+                case 1:
                     current_scale = 100.0 + (magnitude * current_wave * 0.1);
                     break;
 
-                case 2: {        
+                case 2: {
                     current_offsetX = dx * magnitude * current_wave;
                     current_offsetY = dy * magnitude * current_wave;
 
                     double phaseShift = wave_type == 0 ? 0.25 : 0.125;
-                    double m_scale = calculateWaveValue(wave_type, frequency, current_time_secs, phase + phaseShift);
+                    double m_scale;
+
+                    if (has_frequency_keyframes) {
+                        m_scale = calculateWaveValue(wave_type, 0, 0, phase + phaseShift, current_accumulated_phase);
+                    }
+                    else {
+                        m_scale = calculateWaveValue(wave_type, frequency, current_time_secs, phase + phaseShift);
+                    }
                     current_scale = 100.0 + (magnitude * m_scale * 0.1);
                     break;
                 }
                 }
 
                 switch (direction) {
-                case 0:       
+                case 0:
                     next_offsetX = dx * magnitude * next_wave;
                     next_offsetY = dy * magnitude * next_wave;
                     break;
 
-                case 1:      
+                case 1:
                     next_scale = 100.0 + (magnitude * next_wave * 0.1);
                     break;
 
-                case 2: {        
+                case 2: {
                     next_offsetX = dx * magnitude * next_wave;
                     next_offsetY = dy * magnitude * next_wave;
 
                     double phaseShift = wave_type == 0 ? 0.25 : 0.125;
-                    double m_scale = calculateWaveValue(wave_type, frequency, next_time_secs, phase + phaseShift);
+                    double m_scale;
+
+                    if (has_frequency_keyframes) {
+                        m_scale = calculateWaveValue(wave_type, 0, 0, next_phase + phaseShift, next_accumulated_phase);
+                    }
+                    else {
+                        m_scale = calculateWaveValue(wave_type, frequency, next_time_secs, next_phase + phaseShift);
+                    }
                     next_scale = 100.0 + (magnitude * m_scale * 0.1);
                     break;
                 }
@@ -970,14 +1086,44 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             bool mirror = false;
             bool has_frequency_keyframes = false;
 
-            bool normal_enabled = true;           
-            bool compatibility_enabled = false;    
+            bool normal_enabled = true;
+            bool compatibility_enabled = false;
             double compat_magnitude = 50.0;
             double compat_speed = 1.0;
             double compat_evolution = 0.0;
             double compat_seed = 0.0;
             double compat_angle = 45.0;
             double compat_slack = 0.25;
+
+            double prev_magnitude = magnitude;
+            double prev_frequency = frequency;
+            double prev_evolution = evolution;
+            double prev_seed = seed;
+            double prev_angle = angle;
+            double prev_slack = slack;
+            double prev_zshake = zshake;
+
+            double next_magnitude = magnitude;
+            double next_frequency = frequency;
+            double next_evolution = evolution;
+            double next_seed = seed;
+            double next_angle = angle;
+            double next_slack = slack;
+            double next_zshake = zshake;
+
+            double prev_compat_magnitude = compat_magnitude;
+            double prev_compat_speed = compat_speed;
+            double prev_compat_evolution = compat_evolution;
+            double prev_compat_seed = compat_seed;
+            double prev_compat_angle = compat_angle;
+            double prev_compat_slack = compat_slack;
+
+            double next_compat_magnitude = compat_magnitude;
+            double next_compat_speed = compat_speed;
+            double next_compat_evolution = compat_evolution;
+            double next_compat_seed = compat_seed;
+            double next_compat_angle = compat_angle;
+            double next_compat_slack = compat_slack;
 
             A_long num_params = 0;
             err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
@@ -1050,6 +1196,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     magnitude = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_magnitude = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_magnitude = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1069,6 +1230,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     frequency = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_frequency = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_frequency = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1082,6 +1258,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     evolution = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_evolution = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_evolution = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1095,6 +1286,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     seed = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_seed = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_seed = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1108,6 +1314,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     angle = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_angle = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_angle = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1121,6 +1342,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     slack = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_slack = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_slack = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1134,6 +1370,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     zshake = value.val.one_d;
                     suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                 }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_zshake = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_zshake = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
@@ -1187,6 +1438,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_magnitude = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &prev_time, FALSE, &value);
+                    if (!err) {
+                        prev_compat_magnitude = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &next_time, FALSE, &value);
+                    if (!err) {
+                        next_compat_magnitude = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
 
@@ -1200,6 +1466,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_speed = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &prev_time, FALSE, &value);
+                    if (!err) {
+                        prev_compat_speed = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &next_time, FALSE, &value);
+                    if (!err) {
+                        next_compat_speed = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
 
@@ -1213,6 +1494,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_evolution = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &prev_time, FALSE, &value);
+                    if (!err) {
+                        prev_compat_evolution = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &next_time, FALSE, &value);
+                    if (!err) {
+                        next_compat_evolution = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
 
@@ -1226,6 +1522,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_seed = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &prev_time, FALSE, &value);
+                    if (!err) {
+                        prev_compat_seed = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &next_time, FALSE, &value);
+                    if (!err) {
+                        next_compat_seed = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
 
@@ -1239,6 +1550,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_angle = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &prev_time, FALSE, &value);
+                    if (!err) {
+                        prev_compat_angle = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
+                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                        &next_time, FALSE, &value);
+                    if (!err) {
+                        next_compat_angle = value.val.one_d;
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
 
@@ -1252,374 +1578,21 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                         compat_slack = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
 
-            double prev_magnitude = magnitude;
-            double prev_frequency = frequency;
-            double prev_evolution = evolution;
-            double prev_seed = seed;
-            double prev_angle = angle;
-            double prev_slack = slack;
-            double prev_zshake = zshake;
-            double prev_compat_magnitude = compat_magnitude;
-            double prev_compat_speed = compat_speed;
-            double prev_compat_evolution = compat_evolution;
-            double prev_compat_seed = compat_seed;
-            double prev_compat_angle = compat_angle;
-            double prev_compat_slack = compat_slack;
-
-            double next_magnitude = magnitude;
-            double next_frequency = frequency;
-            double next_evolution = evolution;
-            double next_seed = seed;
-            double next_angle = angle;
-            double next_slack = slack;
-            double next_zshake = zshake;
-            double next_compat_magnitude = compat_magnitude;
-            double next_compat_speed = compat_speed;
-            double next_compat_evolution = compat_evolution;
-            double next_compat_seed = compat_seed;
-            double next_compat_angle = compat_angle;
-            double next_compat_slack = compat_slack;
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MAGNITUDE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_magnitude = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_frequency = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, EVOLUTION_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_evolution = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SEED_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_seed = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_angle = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SLACK_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_slack = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ZSHAKE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &prev_time, FALSE, &value);
-                if (!err) {
-                    prev_zshake = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MAGNITUDE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_magnitude = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_frequency = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, EVOLUTION_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_evolution = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SEED_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_seed = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_angle = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SLACK_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_slack = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ZSHAKE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &next_time, FALSE, &value);
-                if (!err) {
-                    next_zshake = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            if (compatibility_enabled) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_MAGNITUDE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_compat_magnitude = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SPEED_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_compat_speed = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_EVOLUTION_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_compat_evolution = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SEED_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_compat_seed = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_compat_angle = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SLACK_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
                     err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
                         &prev_time, FALSE, &value);
                     if (!err) {
                         prev_compat_slack = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
 
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_MAGNITUDE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_compat_magnitude = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SPEED_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_compat_speed = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_EVOLUTION_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_compat_evolution = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SEED_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_compat_seed = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_compat_angle = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SLACK_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
                     err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
                         &next_time, FALSE, &value);
                     if (!err) {
                         next_compat_slack = value.val.one_d;
                         suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
                     }
+
                     suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
             }
@@ -1628,7 +1601,7 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
 
             double layer_time_offset = 0;
-            A_Ratio stretch_factor = { 1, 1 };      
+            A_Ratio stretch_factor = { 1, 1 };
 
             if (!err && layer_id != 0) {
                 A_Time in_point;
@@ -1645,13 +1618,6 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             double current_time_secs = (double)current_time.value / (double)current_time.scale;
             double next_time_secs = (double)next_time.value / (double)next_time.scale;
 
-            if (has_frequency_keyframes) {
-                double time_offset = (double)in_data->time_step / (double)in_data->time_scale / 2.0;
-                prev_time_secs += time_offset;
-                current_time_secs += time_offset;
-                next_time_secs += time_offset;
-            }
-
             prev_time_secs -= layer_time_offset;
             current_time_secs -= layer_time_offset;
             next_time_secs -= layer_time_offset;
@@ -1661,18 +1627,123 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             current_time_secs *= stretch_ratio;
             next_time_secs *= stretch_ratio;
 
+            auto valueAtTime = [&suites, effectH](int stream_index, double time_secs, double time_scale) -> double {
+                PF_Err local_err = PF_Err_NONE;
+                double value_out = 0.0;
+
+                AEGP_StreamRefH stream_ref = NULL;
+                A_Time time;
+                time.value = (A_long)(time_secs * time_scale);
+                time.scale = (A_long)time_scale;
+
+                local_err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+                    NULL,
+                    effectH,
+                    stream_index,
+                    &stream_ref);
+
+                if (!local_err && stream_ref) {
+                    AEGP_StreamValue2 stream_value;
+                    local_err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                        NULL,
+                        stream_ref,
+                        AEGP_LTimeMode_LayerTime,
+                        &time,
+                        FALSE,
+                        &stream_value);
+
+                    if (!local_err) {
+                        AEGP_StreamType stream_type;
+                        local_err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
+
+                        if (!local_err) {
+                            switch (stream_type) {
+                            case AEGP_StreamType_OneD:
+                                value_out = stream_value.val.one_d;
+                                break;
+
+                            case AEGP_StreamType_TwoD:
+                            case AEGP_StreamType_TwoD_SPATIAL:
+                                value_out = stream_value.val.two_d.x;
+                                break;
+
+                            case AEGP_StreamType_ThreeD:
+                            case AEGP_StreamType_ThreeD_SPATIAL:
+                                value_out = stream_value.val.three_d.x;
+                                break;
+
+                            case AEGP_StreamType_COLOR:
+                                value_out = stream_value.val.color.redF;
+                                break;
+                            }
+                        }
+
+                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+                    }
+
+                    suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+                }
+
+                return value_out;
+                };
+
+            auto valueAtTimeHz = [&valueAtTime, &has_frequency_keyframes, FREQUENCY_PARAM](
+                int stream_index, double time_secs, double duration, double time_scale) -> double {
+
+                    double value_out = valueAtTime(stream_index, time_secs, time_scale);
+
+                    if (stream_index == FREQUENCY_PARAM && has_frequency_keyframes) {
+                        bool isHz = true;
+
+                        if (isHz) {
+                            double accumulated_phase = 0.0;
+                            double fps = 120.0;
+                            int totalSteps = (int)round(duration * fps);
+                            int curSteps = (int)round(fps * time_secs);
+
+                            if (curSteps >= 0) {
+                                for (int i = 0; i <= curSteps; i++) {
+                                    double stepValue = valueAtTime(stream_index, i / fps, time_scale);
+                                    accumulated_phase += stepValue / fps;
+                                }
+                                value_out = accumulated_phase;
+                            }
+                        }
+                    }
+
+                    return value_out;
+                };
+
+            double time_scale = current_time.scale;
+            double duration = current_time_secs;
+
+            double prev_accumulated_phase = 0.0;
+            double current_accumulated_phase = 0.0;
+            double next_accumulated_phase = 0.0;
+
+            if (has_frequency_keyframes && normal_enabled) {
+                prev_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, prev_time_secs, prev_time_secs, time_scale);
+                current_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, current_time_secs, current_time_secs, time_scale);
+                next_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, next_time_secs, next_time_secs, time_scale);
+            }
+
             double prev_dx, prev_dy, prev_dz;
             double curr_dx, curr_dy, curr_dz;
             double next_dx, next_dy, next_dz;
 
             if (normal_enabled) {
-                double prev_evolution_val = prev_evolution + prev_frequency * prev_time_secs;
-                double current_evolution_val = evolution + frequency * current_time_secs;
-                double next_evolution_val = next_evolution + next_frequency * next_time_secs;
+                double prev_evolution_val, current_evolution_val, next_evolution_val;
 
-                double prev_angleRad = prev_angle * M_PI / 180.0;
-                double curr_angleRad = angle * M_PI / 180.0;
-                double next_angleRad = next_angle * M_PI / 180.0;
+                if (has_frequency_keyframes) {
+                    prev_evolution_val = prev_evolution + prev_accumulated_phase;
+                    current_evolution_val = evolution + current_accumulated_phase;
+                    next_evolution_val = next_evolution + next_accumulated_phase;
+                }
+                else {
+                    prev_evolution_val = prev_evolution + prev_frequency * prev_time_secs;
+                    current_evolution_val = evolution + frequency * current_time_secs;
+                    next_evolution_val = next_evolution + next_frequency * next_time_secs;
+                }
 
                 prev_dx = SimplexNoise::noise(prev_evolution_val, prev_seed * 49235.319798);
                 prev_dy = SimplexNoise::noise(prev_evolution_val + 7468.329, prev_seed * 19337.940385);
@@ -1698,22 +1769,22 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 next_dy *= next_magnitude * next_slack;
                 next_dz *= next_zshake;
             }
-            else {   
+            else {
                 double prev_evolution_compat = prev_compat_evolution + (prev_time_secs * prev_compat_speed) - prev_compat_speed;
                 double curr_evolution_compat = compat_evolution + (current_time_secs * compat_speed) - compat_speed;
                 double next_evolution_compat = next_compat_evolution + (next_time_secs * next_compat_speed) - next_compat_speed;
 
                 prev_dx = SimplexNoise::noise(prev_compat_seed * 54623.245, 0, prev_evolution_compat + prev_compat_seed * 49235.319798);
                 prev_dy = SimplexNoise::noise(0, prev_compat_seed * 8723.5647, prev_evolution_compat + 7468.329 + prev_compat_seed * 19337.940385);
-                prev_dz = 0;       
+                prev_dz = 0;
 
                 curr_dx = SimplexNoise::noise(compat_seed * 54623.245, 0, curr_evolution_compat + compat_seed * 49235.319798);
                 curr_dy = SimplexNoise::noise(0, compat_seed * 8723.5647, curr_evolution_compat + 7468.329 + compat_seed * 19337.940385);
-                curr_dz = 0;       
+                curr_dz = 0;
 
                 next_dx = SimplexNoise::noise(next_compat_seed * 54623.245, 0, next_evolution_compat + next_compat_seed * 49235.319798);
                 next_dy = SimplexNoise::noise(0, next_compat_seed * 8723.5647, next_evolution_compat + 7468.329 + next_compat_seed * 19337.940385);
-                next_dz = 0;       
+                next_dz = 0;
 
                 prev_dx *= prev_compat_magnitude;
                 prev_dy *= prev_compat_magnitude * prev_compat_slack;
@@ -1791,730 +1862,1282 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
             }
         }
 
-        if (strstr(match_name, "DKT Swing")) {
-            double frequency = 2.0;
-            double angle1 = -30.0;
-            double angle2 = 30.0;
-            double phase = 0.0;
-            A_long wave_type = 0;    
-            bool x_tiles = false;
-            bool y_tiles = false;
-            bool mirror = false;
-            bool has_frequency_keyframes = false;
-            bool has_phase_keyframes = false;
-            bool has_angle1_keyframes = false;
-            bool has_angle2_keyframes = false;
+else if (strstr(match_name, "DKT Swing")) {
+    double frequency = 2.0;
+    double angle1 = -30.0;
+    double angle2 = 30.0;
+    double phase = 0.0;
+    A_long wave_type = 0;
+    bool x_tiles = false;
+    bool y_tiles = false;
+    bool mirror = false;
+    bool has_frequency_keyframes = false;
+    bool has_phase_keyframes = false;
+    bool has_angle1_keyframes = false;
+    bool has_angle2_keyframes = false;
+    bool normal_enabled = true;
+    bool compatibility_enabled = false;
+    double compat_frequency = 2.0;
+    double compat_angle1 = -30.0;
+    double compat_angle2 = 30.0;
+    double compat_phase = 0.0;
+    A_long compat_wave_type = 0;
 
-            A_long num_params = 0;
-            err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
-            if (err) {
-                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
-                continue;
-            }
+    A_long num_params = 0;
+    err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
+    if (err) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
 
-            const int FREQUENCY_PARAM = 1;
-            const int ANGLE1_PARAM = 2;
-            const int ANGLE2_PARAM = 3;
-            const int PHASE_PARAM = 4;
-            const int WAVE_TYPE_PARAM = 5;
-            const int X_TILES_PARAM = 7;     
-            const int Y_TILES_PARAM = 8;
-            const int MIRROR_PARAM = 9;
+    const int NORMAL_CHECKBOX_PARAM = 1;
+    const int FREQUENCY_PARAM = 2;
+    const int ANGLE1_PARAM = 3;
+    const int ANGLE2_PARAM = 4;
+    const int PHASE_PARAM = 5;
+    const int WAVE_TYPE_PARAM = 6;
+    const int X_TILES_PARAM = 8;
+    const int Y_TILES_PARAM = 9;
+    const int MIRROR_PARAM = 10;
+    const int COMPATIBILITY_CHECKBOX_PARAM = 13;
+    const int COMPATIBILITY_FREQUENCY_PARAM = 14;
+    const int COMPATIBILITY_ANGLE1_PARAM = 15;
+    const int COMPATIBILITY_ANGLE2_PARAM = 16;
+    const int COMPATIBILITY_PHASE_PARAM = 17;
+    const int COMPATIBILITY_WAVE_TYPE_PARAM = 18;
 
-            if (num_params < 10) {
-                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
-                continue;
-            }
+    if (num_params < 19) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
 
-            AEGP_StreamRefH streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_frequency_keyframes = true;
-                }
+    AEGP_StreamRefH streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, NORMAL_CHECKBOX_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            normal_enabled = (value.val.one_d != 0);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
 
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    frequency = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_CHECKBOX_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            compatibility_enabled = (value.val.one_d != 0);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE1_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_angle1_keyframes = true;
-                }
+    if ((normal_enabled && compatibility_enabled) || (!normal_enabled && !compatibility_enabled)) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
 
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    angle1 = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE2_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_angle2_keyframes = true;
-                }
-
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    angle2 = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_phase_keyframes = true;
-                }
-
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    phase = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, WAVE_TYPE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    wave_type = (A_long)value.val.one_d - 1;       
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, X_TILES_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    x_tiles = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, Y_TILES_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    y_tiles = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MIRROR_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    mirror = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
-
-            double prev_time_secs = (double)prev_time.value / (double)prev_time.scale;
-            double current_time_secs = (double)current_time.value / (double)current_time.scale;
-            double next_time_secs = (double)next_time.value / (double)next_time.scale;
-
-            if (has_frequency_keyframes) {
-                double time_offset = (double)in_data->time_step / (double)in_data->time_scale / 2.0;
-                prev_time_secs += time_offset;
-                current_time_secs += time_offset;
-                next_time_secs += time_offset;
-            }
-
-            AEGP_LayerIDVal layer_id = 0;
-            err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
-
-            double layer_time_offset = 0;
-            A_Ratio stretch_factor = { 1, 1 };      
-
-            if (!err && layer_id != 0) {
-                A_Time in_point;
-                err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layerH, AEGP_LTimeMode_LayerTime, &in_point);
-
-                if (!err) {
-                    layer_time_offset = (double)in_point.value / (double)in_point.scale;
-                }
-
-                err = suites.LayerSuite9()->AEGP_GetLayerStretch(layerH, &stretch_factor);
-            }
-
-            prev_time_secs -= layer_time_offset;
-            current_time_secs -= layer_time_offset;
-            next_time_secs -= layer_time_offset;
-
-            double stretch_ratio = (double)stretch_factor.num / (double)stretch_factor.den;
-            prev_time_secs *= stretch_ratio;
-            current_time_secs *= stretch_ratio;
-            next_time_secs *= stretch_ratio;
-
-            double prev_frequency = frequency, next_frequency = frequency;
-            double prev_angle1 = angle1, next_angle1 = angle1;
-            double prev_angle2 = angle2, next_angle2 = angle2;
-            double prev_phase = phase, next_phase = phase;
-
-            if (has_frequency_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_frequency = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_frequency_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_frequency = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_angle1_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE1_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_angle1 = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_angle1_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE1_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_angle1 = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_angle2_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE2_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_angle2 = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_angle2_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE2_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_angle2 = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_phase_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_phase = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_phase = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            double prev_effective_phase = prev_phase + (prev_frequency * prev_time_secs);
-            double current_effective_phase = phase + (frequency * current_time_secs);
-            double next_effective_phase = next_phase + (next_frequency * next_time_secs);
-
-            auto calculateWaveValue = [](int wave_type, double phase) -> double {
-                double m;
-                if (wave_type == 0) {   
-                    m = sin(phase * M_PI);
-                }
-                else {   
-                    double t = fmod(phase / 2.0 + 0.75, 1.0);
-                    if (t < 0) t += 1.0;
-                    m = (fabs(t - 0.5) - 0.25) * 4.0;
-                }
-                return m;
-                };
-
-            double prev_m = calculateWaveValue(wave_type, prev_effective_phase);
-            double current_m = calculateWaveValue(wave_type, current_effective_phase);
-            double next_m = calculateWaveValue(wave_type, next_effective_phase);
-
-            double prev_t = (prev_m + 1.0) / 2.0;
-            double current_t = (current_m + 1.0) / 2.0;
-            double next_t = (next_m + 1.0) / 2.0;
-
-            double prev_angle = -(prev_angle1 + prev_t * (prev_angle2 - prev_angle1));
-            double current_angle = -(angle1 + current_t * (angle2 - angle1));
-            double next_angle = -(next_angle1 + next_t * (next_angle2 - next_angle1));
-
-            double prev_angle_rad = prev_angle * M_PI / 180.0;
-            double current_angle_rad = current_angle * M_PI / 180.0;
-            double next_angle_rad = next_angle * M_PI / 180.0;
-
-            double prev_to_current_angle = current_angle_rad - prev_angle_rad;
-            double current_to_next_angle = next_angle_rad - current_angle_rad;
-
-            double angle_change = fabs(current_to_next_angle) > fabs(prev_to_current_angle) ?
-                current_to_next_angle : prev_to_current_angle;
-
-            *rotation_angle = angle_change;
-
-            if (fabs(*rotation_angle) > 0.01) {
-                found_motion = true;
-            }
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_frequency_keyframes = true;
         }
 
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            frequency = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
 
-        if (strstr(match_name, "DKT Pulse Size")) {
-            double frequency = 2.00;
-            double shrink = 0.90;
-            double grow = 1.10;
-            double phase = 0.00;
-            A_long wave_type = 0;    
-            bool x_tiles = false;
-            bool y_tiles = false;
-            bool mirror = false;
-            bool has_frequency_keyframes = false;
-            bool has_phase_keyframes = false;
-            bool has_shrink_keyframes = false;
-            bool has_grow_keyframes = false;
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE1_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_angle1_keyframes = true;
+        }
 
-            A_long num_params = 0;
-            err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
-            if (err) {
-                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
-                continue;
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            angle1 = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ANGLE2_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_angle2_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            angle2 = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_phase_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            phase = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, WAVE_TYPE_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            wave_type = (A_long)value.val.one_d - 1;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, X_TILES_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            x_tiles = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, Y_TILES_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            y_tiles = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MIRROR_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            mirror = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    if (compatibility_enabled) {
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_FREQUENCY_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
             }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
 
-            const int FREQUENCY_PARAM = 1;
-            const int SHRINK_PARAM = 2;
-            const int GROW_PARAM = 3;
-            const int PHASE_PARAM = 4;
-            const int WAVE_TYPE_PARAM = 5;
-            const int X_TILES_PARAM = 7;
-            const int Y_TILES_PARAM = 8;
-            const int MIRROR_PARAM = 9;
-            if (num_params < 11) {
-                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
-                continue;
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE1_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_angle1 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
             }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
 
-            AEGP_StreamRefH streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_frequency_keyframes = true;
-                }
-
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    frequency = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE2_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_angle2 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
             }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SHRINK_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_shrink_keyframes = true;
-                }
-
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    shrink = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_PHASE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
             }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, GROW_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_grow_keyframes = true;
-                }
-
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    grow = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_WAVE_TYPE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_wave_type = (A_long)value.val.one_d - 1;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
             }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+    }
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
-            if (!err && streamH) {
-                A_long num_keyframes = 0;
-                err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
-                if (!err && num_keyframes > 0) {
-                    has_phase_keyframes = true;
-                }
+    double prev_time_secs = (double)prev_time.value / (double)prev_time.scale;
+    double current_time_secs = (double)current_time.value / (double)current_time.scale;
+    double next_time_secs = (double)next_time.value / (double)next_time.scale;
 
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    phase = value.val.one_d;
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+    AEGP_LayerIDVal layer_id = 0;
+    err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, WAVE_TYPE_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    wave_type = (A_long)value.val.one_d - 1;       
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+    double layer_time_offset = 0;
+    A_Ratio stretch_factor = { 1, 1 };
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, X_TILES_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    x_tiles = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+    if (!err && layer_id != 0) {
+        A_Time in_point;
+        err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layerH, AEGP_LTimeMode_LayerTime, &in_point);
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, Y_TILES_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    y_tiles = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+        if (!err) {
+            layer_time_offset = (double)in_point.value / (double)in_point.scale;
+        }
 
-            streamH = NULL;
-            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MIRROR_PARAM, &streamH);
-            if (!err && streamH) {
-                AEGP_StreamValue2 value;
-                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                    &current_time, FALSE, &value);
-                if (!err) {
-                    mirror = (value.val.one_d > 0.5);
-                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                }
-                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-            }
+        err = suites.LayerSuite9()->AEGP_GetLayerStretch(layerH, &stretch_factor);
+    }
 
-            double prev_time_secs = (double)prev_time.value / (double)prev_time.scale;
-            double current_time_secs = (double)current_time.value / (double)current_time.scale;
-            double next_time_secs = (double)next_time.value / (double)next_time.scale;
+    prev_time_secs -= layer_time_offset;
+    current_time_secs -= layer_time_offset;
+    next_time_secs -= layer_time_offset;
 
-            if (has_frequency_keyframes) {
-                double time_offset = (double)in_data->time_step / (double)in_data->time_scale / 2.0;
-                prev_time_secs += time_offset;
-                current_time_secs += time_offset;
-                next_time_secs += time_offset;
-            }
+    double stretch_ratio = (double)stretch_factor.num / (double)stretch_factor.den;
+    prev_time_secs *= stretch_ratio;
+    current_time_secs *= stretch_ratio;
+    next_time_secs *= stretch_ratio;
 
-            AEGP_LayerIDVal layer_id = 0;
-            err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
+    auto valueAtTime = [&suites, effectH](int stream_index, double time_secs, double time_scale) -> double {
+        PF_Err local_err = PF_Err_NONE;
+        double value_out = 0.0;
 
-            double layer_time_offset = 0;
-            A_Ratio stretch_factor = { 1, 1 };      
+        AEGP_StreamRefH stream_ref = NULL;
+        A_Time time;
+        time.value = (A_long)(time_secs * time_scale);
+        time.scale = (A_long)time_scale;
 
-            if (!err && layer_id != 0) {
-                A_Time in_point;
-                err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layerH, AEGP_LTimeMode_LayerTime, &in_point);
+        local_err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+            NULL,
+            effectH,
+            stream_index,
+            &stream_ref);
 
-                if (!err) {
-                    layer_time_offset = (double)in_point.value / (double)in_point.scale;
-                }
+        if (!local_err && stream_ref) {
+            AEGP_StreamValue2 stream_value;
+            local_err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                NULL,
+                stream_ref,
+                AEGP_LTimeMode_LayerTime,
+                &time,
+                FALSE,
+                &stream_value);
 
-                err = suites.LayerSuite9()->AEGP_GetLayerStretch(layerH, &stretch_factor);
-            }
+            if (!local_err) {
+                AEGP_StreamType stream_type;
+                local_err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
 
-            prev_time_secs -= layer_time_offset;
-            current_time_secs -= layer_time_offset;
-            next_time_secs -= layer_time_offset;
+                if (!local_err) {
+                    switch (stream_type) {
+                    case AEGP_StreamType_OneD:
+                        value_out = stream_value.val.one_d;
+                        break;
 
-            double stretch_ratio = (double)stretch_factor.num / (double)stretch_factor.den;
-            prev_time_secs *= stretch_ratio;
-            current_time_secs *= stretch_ratio;
-            next_time_secs *= stretch_ratio;
+                    case AEGP_StreamType_TwoD:
+                    case AEGP_StreamType_TwoD_SPATIAL:
+                        value_out = stream_value.val.two_d.x;
+                        break;
 
-            double prev_frequency = frequency, next_frequency = frequency;
-            double prev_shrink = shrink, next_shrink = shrink;
-            double prev_grow = grow, next_grow = grow;
-            double prev_phase = phase, next_phase = phase;
+                    case AEGP_StreamType_ThreeD:
+                    case AEGP_StreamType_ThreeD_SPATIAL:
+                        value_out = stream_value.val.three_d.x;
+                        break;
 
-            if (has_frequency_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_frequency = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                    case AEGP_StreamType_COLOR:
+                        value_out = stream_value.val.color.redF;
+                        break;
                     }
+                }
 
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_frequency = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+            }
+
+            suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+        }
+
+        return value_out;
+        };
+
+    auto valueAtTimeHz = [&valueAtTime, &has_frequency_keyframes, FREQUENCY_PARAM](
+        int stream_index, double time_secs, double duration, double time_scale) -> double {
+
+            double value_out = valueAtTime(stream_index, time_secs, time_scale);
+
+            if (stream_index == FREQUENCY_PARAM && has_frequency_keyframes) {
+                bool isHz = true;        
+
+                if (isHz) {
+                    double accumulated_phase = 0.0;
+                    double fps = 120.0;    
+                    int totalSteps = (int)round(duration * fps);
+                    int curSteps = (int)round(fps * time_secs);
+
+                    if (curSteps >= 0) {
+                        for (int i = 0; i <= curSteps; i++) {
+                            double stepValue = valueAtTime(stream_index, i / fps, time_scale);
+                            accumulated_phase += stepValue / fps;
+                        }
+                        value_out = accumulated_phase;
                     }
-
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
                 }
             }
 
-            if (has_shrink_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SHRINK_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
+            return value_out;
+        };
 
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_shrink = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
+    double time_scale = current_time.scale;          
+    double duration = current_time_secs;
 
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_shrink = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
+    double prev_accumulated_phase = 0.0;
+    double current_accumulated_phase = 0.0;
+    double next_accumulated_phase = 0.0;
 
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    if (has_frequency_keyframes && normal_enabled) {
+        prev_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, prev_time_secs, prev_time_secs, time_scale);
+        current_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, current_time_secs, current_time_secs, time_scale);
+        next_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, next_time_secs, next_time_secs, time_scale);
+    }
+
+    auto TriangleWave = [](double t) -> double {
+        t = fmod(t + 0.75, 1.0);
+        if (t < 0) t += 1.0;
+        return (fabs(t - 0.5) - 0.25) * 4.0;
+        };
+
+    double prev_m, current_m, next_m;
+    double prev_t, current_t, next_t;
+    double prev_angle, current_angle, next_angle;
+
+    if (compatibility_enabled) {
+        double prev_compat_frequency = compat_frequency;
+        double prev_compat_angle1 = compat_angle1;
+        double prev_compat_angle2 = compat_angle2;
+        double prev_compat_phase = compat_phase;
+
+        double next_compat_frequency = compat_frequency;
+        double next_compat_angle1 = compat_angle1;
+        double next_compat_angle2 = compat_angle2;
+        double next_compat_phase = compat_phase;
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_FREQUENCY_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE1_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_angle1 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE2_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_angle2 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_PHASE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_FREQUENCY_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE1_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_angle1 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_ANGLE2_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_angle2 = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_PHASE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        auto calculateCompatWaveValue = [&TriangleWave](int wave_type, double frequency, double time, double phase) -> double {
+            double m;
+            if (wave_type == 0) {
+                m = sin((time * frequency + phase) * M_PI);
+            }
+            else {
+                m = TriangleWave(((time * frequency) + phase) / 2.0);
+            }
+            return m;
+            };
+
+        prev_m = calculateCompatWaveValue(compat_wave_type, prev_compat_frequency, prev_time_secs, prev_compat_phase);
+        current_m = calculateCompatWaveValue(compat_wave_type, compat_frequency, current_time_secs, compat_phase);
+        next_m = calculateCompatWaveValue(compat_wave_type, next_compat_frequency, next_time_secs, next_compat_phase);
+
+        prev_t = (prev_m + 1.0) / 2.0;
+        current_t = (current_m + 1.0) / 2.0;
+        next_t = (next_m + 1.0) / 2.0;
+
+        prev_angle = -(prev_compat_angle1 + prev_t * (prev_compat_angle2 - prev_compat_angle1));
+        current_angle = -(compat_angle1 + current_t * (compat_angle2 - compat_angle1));
+        next_angle = -(next_compat_angle1 + next_t * (next_compat_angle2 - next_compat_angle1));
+    }
+    else {
+        double prev_phase_value = phase;
+        double next_phase_value = phase;
+        double prev_angle1_value = angle1;
+        double prev_angle2_value = angle2;
+        double next_angle1_value = angle1;
+        double next_angle2_value = angle2;
+
+        if (has_phase_keyframes) {
+            prev_phase_value = valueAtTime(PHASE_PARAM, prev_time_secs, time_scale);
+            next_phase_value = valueAtTime(PHASE_PARAM, next_time_secs, time_scale);
+        }
+
+        if (has_angle1_keyframes) {
+            prev_angle1_value = valueAtTime(ANGLE1_PARAM, prev_time_secs, time_scale);
+            next_angle1_value = valueAtTime(ANGLE1_PARAM, next_time_secs, time_scale);
+        }
+
+        if (has_angle2_keyframes) {
+            prev_angle2_value = valueAtTime(ANGLE2_PARAM, prev_time_secs, time_scale);
+            next_angle2_value = valueAtTime(ANGLE2_PARAM, next_time_secs, time_scale);
+        }
+
+        auto calculateWaveValue = [&TriangleWave](int wave_type, double frequency, double time, double phase, double accumulated_phase = 0.0) -> double {
+            double X, m;
+
+            if (accumulated_phase > 0.0) {
+                if (wave_type == 0) {
+                    m = sin((accumulated_phase + phase) * M_PI);
+                }
+                else {
+                    m = TriangleWave((accumulated_phase + phase) / 2.0);
                 }
             }
-
-            if (has_grow_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, GROW_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_grow = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_grow = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            if (has_phase_keyframes) {
-                streamH = NULL;
-                err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
-                if (!err && streamH) {
-                    AEGP_StreamValue2 value;
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &prev_time, FALSE, &value);
-                    if (!err) {
-                        prev_phase = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
-                        &next_time, FALSE, &value);
-                    if (!err) {
-                        next_phase = value.val.one_d;
-                        suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
-                    }
-
-                    suites.StreamSuite5()->AEGP_DisposeStream(streamH);
-                }
-            }
-
-            auto calculateWaveValue = [](int wave_type, double frequency, double time, double phase) -> double {
-                double X, m;
-
+            else {
                 if (wave_type == 0) {
                     X = (frequency * time) + phase;
                     m = sin(X * M_PI);
                 }
                 else {
                     X = ((frequency * time) + phase) / 2.0 + phase;
+                    m = TriangleWave(X);
+                }
+            }
 
-                    double t = fmod(X + 0.75, 1.0);
-                    if (t < 0) t += 1.0;
-                    m = (fabs(t - 0.5) - 0.25) * 4.0;
+            return m;
+            };
+
+        if (has_frequency_keyframes) {
+            prev_m = calculateWaveValue(wave_type, 0, 0, prev_phase_value, prev_accumulated_phase);
+            current_m = calculateWaveValue(wave_type, 0, 0, phase, current_accumulated_phase);
+            next_m = calculateWaveValue(wave_type, 0, 0, next_phase_value, next_accumulated_phase);
+        }
+        else {
+            prev_m = calculateWaveValue(wave_type, frequency, prev_time_secs, prev_phase_value);
+            current_m = calculateWaveValue(wave_type, frequency, current_time_secs, phase);
+            next_m = calculateWaveValue(wave_type, frequency, next_time_secs, next_phase_value);
+        }
+
+        prev_t = (prev_m + 1.0) / 2.0;
+        current_t = (current_m + 1.0) / 2.0;
+        next_t = (next_m + 1.0) / 2.0;
+
+        prev_angle = -(prev_angle1_value + prev_t * (prev_angle2_value - prev_angle1_value));
+        current_angle = -(angle1 + current_t * (angle2 - angle1));
+        next_angle = -(next_angle1_value + next_t * (next_angle2_value - next_angle1_value));
+    }
+
+    double prev_angle_rad = prev_angle * M_PI / 180.0;
+    double current_angle_rad = current_angle * M_PI / 180.0;
+    double next_angle_rad = next_angle * M_PI / 180.0;
+
+    double prev_to_current_angle = current_angle_rad - prev_angle_rad;
+    double current_to_next_angle = next_angle_rad - current_angle_rad;
+
+    double angle_change = fabs(current_to_next_angle) > fabs(prev_to_current_angle) ?
+        current_to_next_angle : prev_to_current_angle;
+
+    *rotation_angle = angle_change;
+
+    if (fabs(*rotation_angle) > 0.01) {
+        found_motion = true;
+    }
+}
+
+
+if (strstr(match_name, "DKT Pulse Size")) {
+    double frequency = 2.00;
+    double shrink = 0.90;
+    double grow = 1.10;
+    double phase = 0.00;
+    A_long wave_type = 0;
+    bool x_tiles = false;
+    bool y_tiles = false;
+    bool mirror = false;
+    bool has_frequency_keyframes = false;
+    bool has_phase_keyframes = false;
+    bool has_shrink_keyframes = false;
+    bool has_grow_keyframes = false;
+    bool normal_enabled = true;
+    bool compatibility_enabled = false;
+    double compat_frequency = 2.00;
+    double compat_shrink = 0.90;
+    double compat_grow = 1.10;
+    double compat_phase = 0.00;
+    A_long compat_wave_type = 0;
+
+    A_long num_params = 0;
+    err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
+    if (err) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
+
+    const int NORMAL_CHECKBOX_PARAM = 1;
+    const int FREQUENCY_PARAM = 2;
+    const int SHRINK_PARAM = 3;
+    const int GROW_PARAM = 4;
+    const int PHASE_PARAM = 5;
+    const int WAVE_TYPE_PARAM = 6;
+    const int X_TILES_PARAM = 8;
+    const int Y_TILES_PARAM = 9;
+    const int MIRROR_PARAM = 10;
+    const int COMPATIBILITY_CHECKBOX_PARAM = 13;
+    const int COMPATIBILITY_FREQUENCY_PARAM = 14;
+    const int COMPATIBILITY_SHRINK_PARAM = 15;
+    const int COMPATIBILITY_GROW_PARAM = 16;
+    const int COMPATIBILITY_PHASE_PARAM = 17;
+    const int COMPATIBILITY_WAVE_TYPE_PARAM = 18;
+
+    if (num_params < 19) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
+
+    AEGP_StreamRefH streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, NORMAL_CHECKBOX_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            normal_enabled = (value.val.one_d != 0);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_CHECKBOX_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            compatibility_enabled = (value.val.one_d != 0);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    if ((normal_enabled && compatibility_enabled) || (!normal_enabled && !compatibility_enabled)) {
+        suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+        continue;
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, FREQUENCY_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_frequency_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            frequency = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SHRINK_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_shrink_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            shrink = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, GROW_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_grow_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            grow = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, PHASE_PARAM, &streamH);
+    if (!err && streamH) {
+        A_long num_keyframes = 0;
+        err = suites.KeyframeSuite3()->AEGP_GetStreamNumKFs(streamH, &num_keyframes);
+        if (!err && num_keyframes > 0) {
+            has_phase_keyframes = true;
+        }
+
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            phase = value.val.one_d;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, WAVE_TYPE_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            wave_type = (A_long)value.val.one_d - 1;
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, X_TILES_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            x_tiles = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, Y_TILES_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            y_tiles = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    streamH = NULL;
+    err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MIRROR_PARAM, &streamH);
+    if (!err && streamH) {
+        AEGP_StreamValue2 value;
+        err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+            &current_time, FALSE, &value);
+        if (!err) {
+            mirror = (value.val.one_d > 0.5);
+            suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+        }
+        suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+    }
+
+    if (compatibility_enabled) {
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_FREQUENCY_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SHRINK_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_shrink = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_GROW_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_grow = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_PHASE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_WAVE_TYPE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &current_time, FALSE, &value);
+            if (!err) {
+                compat_wave_type = (A_long)value.val.one_d - 1;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+    }
+
+    double prev_time_secs = (double)prev_time.value / (double)prev_time.scale;
+    double current_time_secs = (double)current_time.value / (double)current_time.scale;
+    double next_time_secs = (double)next_time.value / (double)next_time.scale;
+
+    AEGP_LayerIDVal layer_id = 0;
+    err = suites.LayerSuite9()->AEGP_GetLayerID(layerH, &layer_id);
+
+    double layer_time_offset = 0;
+    A_Ratio stretch_factor = { 1, 1 };
+
+    if (!err && layer_id != 0) {
+        A_Time in_point;
+        err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layerH, AEGP_LTimeMode_LayerTime, &in_point);
+
+        if (!err) {
+            layer_time_offset = (double)in_point.value / (double)in_point.scale;
+        }
+
+        err = suites.LayerSuite9()->AEGP_GetLayerStretch(layerH, &stretch_factor);
+    }
+
+    prev_time_secs -= layer_time_offset;
+    current_time_secs -= layer_time_offset;
+    next_time_secs -= layer_time_offset;
+
+    double stretch_ratio = (double)stretch_factor.num / (double)stretch_factor.den;
+    prev_time_secs *= stretch_ratio;
+    current_time_secs *= stretch_ratio;
+    next_time_secs *= stretch_ratio;
+
+    auto valueAtTime = [&suites, effectH](int stream_index, double time_secs, double time_scale) -> double {
+        PF_Err local_err = PF_Err_NONE;
+        double value_out = 0.0;
+
+        AEGP_StreamRefH stream_ref = NULL;
+        A_Time time;
+        time.value = (A_long)(time_secs * time_scale);
+        time.scale = (A_long)time_scale;
+
+        local_err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+            NULL,
+            effectH,
+            stream_index,
+            &stream_ref);
+
+        if (!local_err && stream_ref) {
+            AEGP_StreamValue2 stream_value;
+            local_err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+                NULL,
+                stream_ref,
+                AEGP_LTimeMode_LayerTime,
+                &time,
+                FALSE,
+                &stream_value);
+
+            if (!local_err) {
+                AEGP_StreamType stream_type;
+                local_err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
+
+                if (!local_err) {
+                    switch (stream_type) {
+                    case AEGP_StreamType_OneD:
+                        value_out = stream_value.val.one_d;
+                        break;
+
+                    case AEGP_StreamType_TwoD:
+                    case AEGP_StreamType_TwoD_SPATIAL:
+                        value_out = stream_value.val.two_d.x;
+                        break;
+
+                    case AEGP_StreamType_ThreeD:
+                    case AEGP_StreamType_ThreeD_SPATIAL:
+                        value_out = stream_value.val.three_d.x;
+                        break;
+
+                    case AEGP_StreamType_COLOR:
+                        value_out = stream_value.val.color.redF;
+                        break;
+                    }
                 }
 
-                return m;
-                };
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+            }
 
-            double prev_wave = calculateWaveValue(wave_type, prev_frequency, prev_time_secs, prev_phase);
-            double current_wave = calculateWaveValue(wave_type, frequency, current_time_secs, phase);
-            double next_wave = calculateWaveValue(wave_type, next_frequency, next_time_secs, next_phase);
+            suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+        }
 
-            double prev_range = prev_grow - prev_shrink;
-            double current_range = grow - shrink;
-            double next_range = next_grow - next_shrink;
+        return value_out;
+        };
 
-            double prev_scale = (prev_range * ((prev_wave + 1.0) / 2.0)) + prev_shrink;
-            double current_scale = (current_range * ((current_wave + 1.0) / 2.0)) + shrink;
-            double next_scale = (next_range * ((next_wave + 1.0) / 2.0)) + next_shrink;
+    auto valueAtTimeHz = [&valueAtTime, &has_frequency_keyframes, FREQUENCY_PARAM](
+        int stream_index, double time_secs, double duration, double time_scale) -> double {
 
-            double prev_to_current_scale = current_scale - prev_scale;
-            double current_to_next_scale = next_scale - current_scale;
+            double value_out = valueAtTime(stream_index, time_secs, time_scale);
 
-            AEGP_CompH compH = NULL;
-            err = suites.LayerSuite9()->AEGP_GetLayerParentComp(layerH, &compH);
-            if (!err && compH) {
-                AEGP_ItemH itemH = NULL;
-                err = suites.CompSuite11()->AEGP_GetItemFromComp(compH, &itemH);
+            if (stream_index == FREQUENCY_PARAM && has_frequency_keyframes) {
+                bool isHz = true;
 
-                A_long width = 0, height = 0;
-                if (!err && itemH) {
-                    err = suites.ItemSuite9()->AEGP_GetItemDimensions(itemH, &width, &height);
+                if (isHz) {
+                    double accumulated_phase = 0.0;
+                    double fps = 120.0;
+                    int totalSteps = (int)round(duration * fps);
+                    int curSteps = (int)round(fps * time_secs);
 
-                    if (!err) {
-                        double scale_change = fabs(current_to_next_scale) > fabs(prev_to_current_scale) ?
-                            current_to_next_scale : prev_to_current_scale;
-
-                        float max_dimension = MAX(width, height) * 0.5f;
-                        float displacement = max_dimension * scale_change;
-
-                        *scale_velocity_out = displacement * 3.0;
-
-                        if (fabs(*scale_velocity_out) > 0.01f) {
-                            found_motion = true;
+                    if (curSteps >= 0) {
+                        for (int i = 0; i <= curSteps; i++) {
+                            double stepValue = valueAtTime(stream_index, i / fps, time_scale);
+                            accumulated_phase += stepValue / fps;
                         }
+                        value_out = accumulated_phase;
                     }
                 }
             }
+
+            return value_out;
+        };
+
+    double time_scale = current_time.scale;
+    double duration = current_time_secs;
+
+    double prev_accumulated_phase = 0.0;
+    double current_accumulated_phase = 0.0;
+    double next_accumulated_phase = 0.0;
+
+    if (has_frequency_keyframes && normal_enabled) {
+        prev_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, prev_time_secs, prev_time_secs, time_scale);
+        current_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, current_time_secs, current_time_secs, time_scale);
+        next_accumulated_phase = valueAtTimeHz(FREQUENCY_PARAM, next_time_secs, next_time_secs, time_scale);
+    }
+
+    double prev_frequency = frequency, next_frequency = frequency;
+    double prev_shrink = shrink, next_shrink = shrink;
+    double prev_grow = grow, next_grow = grow;
+    double prev_phase = phase, next_phase = phase;
+    double prev_compat_frequency = compat_frequency, next_compat_frequency = compat_frequency;
+    double prev_compat_shrink = compat_shrink, next_compat_shrink = compat_shrink;
+    double prev_compat_grow = compat_grow, next_compat_grow = compat_grow;
+    double prev_compat_phase = compat_phase, next_compat_phase = compat_phase;
+
+    if (has_frequency_keyframes) {
+        prev_frequency = valueAtTime(FREQUENCY_PARAM, prev_time_secs, time_scale);
+        next_frequency = valueAtTime(FREQUENCY_PARAM, next_time_secs, time_scale);
+    }
+
+    if (has_shrink_keyframes) {
+        prev_shrink = valueAtTime(SHRINK_PARAM, prev_time_secs, time_scale);
+        next_shrink = valueAtTime(SHRINK_PARAM, next_time_secs, time_scale);
+    }
+
+    if (has_grow_keyframes) {
+        prev_grow = valueAtTime(GROW_PARAM, prev_time_secs, time_scale);
+        next_grow = valueAtTime(GROW_PARAM, next_time_secs, time_scale);
+    }
+
+    if (has_phase_keyframes) {
+        prev_phase = valueAtTime(PHASE_PARAM, prev_time_secs, time_scale);
+        next_phase = valueAtTime(PHASE_PARAM, next_time_secs, time_scale);
+    }
+
+    if (compatibility_enabled) {
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_FREQUENCY_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_frequency = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
         }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_SHRINK_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_shrink = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_shrink = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_GROW_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_grow = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_grow = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+
+        streamH = NULL;
+        err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, COMPATIBILITY_PHASE_PARAM, &streamH);
+        if (!err && streamH) {
+            AEGP_StreamValue2 value;
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &prev_time, FALSE, &value);
+            if (!err) {
+                prev_compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                &next_time, FALSE, &value);
+            if (!err) {
+                next_compat_phase = value.val.one_d;
+                suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+            }
+
+            suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+        }
+    }
+
+    auto calculateWaveValue = [](int wave_type, double frequency, double time, double phase, double accumulated_phase = 0.0) -> double {
+        double X, m;
+
+        if (accumulated_phase > 0.0) {
+            if (wave_type == 0) {
+                m = sin((accumulated_phase + phase) * M_PI);
+            }
+            else {
+                double t = fmod(((accumulated_phase + phase) / 2.0) + 0.75, 1.0);
+                if (t < 0) t += 1.0;
+                m = (fabs(t - 0.5) - 0.25) * 4.0;
+            }
+        }
+        else {
+            if (wave_type == 0) {
+                X = (frequency * time) + phase;
+                m = sin(X * M_PI);
+            }
+            else {
+                X = ((frequency * time) + phase) / 2.0 + phase;
+                double t = fmod(X + 0.75, 1.0);
+                if (t < 0) t += 1.0;
+                m = (fabs(t - 0.5) - 0.25) * 4.0;
+            }
+        }
+
+        return m;
+        };
+
+    auto TriangleWave = [](double t) -> double {
+        t = fmod(t + 0.75, 1.0);
+        if (t < 0) t += 1.0;
+        return (fabs(t - 0.5) - 0.25) * 4.0;
+        };
+
+    double prev_wave, current_wave, next_wave;
+    double prev_range, current_range, next_range;
+    double prev_scale, current_scale, next_scale;
+
+    if (normal_enabled) {
+        if (has_frequency_keyframes) {
+            prev_wave = calculateWaveValue(wave_type, 0, 0, prev_phase, prev_accumulated_phase);
+            current_wave = calculateWaveValue(wave_type, 0, 0, phase, current_accumulated_phase);
+            next_wave = calculateWaveValue(wave_type, 0, 0, next_phase, next_accumulated_phase);
+        }
+        else {
+            prev_wave = calculateWaveValue(wave_type, prev_frequency, prev_time_secs, prev_phase);
+            current_wave = calculateWaveValue(wave_type, frequency, current_time_secs, phase);
+            next_wave = calculateWaveValue(wave_type, next_frequency, next_time_secs, next_phase);
+        }
+
+        prev_range = prev_grow - prev_shrink;
+        current_range = grow - shrink;
+        next_range = next_grow - next_shrink;
+
+        prev_scale = (prev_range * ((prev_wave + 1.0) / 2.0)) + prev_shrink;
+        current_scale = (current_range * ((current_wave + 1.0) / 2.0)) + shrink;
+        next_scale = (next_range * ((next_wave + 1.0) / 2.0)) + next_shrink;
+    }
+    else {
+        auto calculateCompatWaveValue = [&TriangleWave](int wave_type, double frequency, double time, double phase) -> double {
+            double m;
+            if (wave_type == 0) {
+                m = sin((time * frequency + phase) * M_PI);
+            }
+            else {
+                m = TriangleWave(((time * frequency) + phase) / 2.0);
+            }
+            return m;
+            };
+
+        prev_wave = calculateCompatWaveValue(compat_wave_type, prev_compat_frequency, prev_time_secs, prev_compat_phase);
+        current_wave = calculateCompatWaveValue(compat_wave_type, compat_frequency, current_time_secs, compat_phase);
+        next_wave = calculateCompatWaveValue(compat_wave_type, next_compat_frequency, next_time_secs, next_compat_phase);
+
+        prev_range = prev_compat_grow - prev_compat_shrink;
+        current_range = compat_grow - compat_shrink;
+        next_range = next_compat_grow - next_compat_shrink;
+
+        prev_scale = (prev_range * ((prev_wave + 1.0) / 2.0)) + prev_compat_shrink;
+        current_scale = (current_range * ((current_wave + 1.0) / 2.0)) + compat_shrink;
+        next_scale = (next_range * ((next_wave + 1.0) / 2.0)) + next_compat_shrink;
+    }
+
+    double prev_to_current_scale = current_scale - prev_scale;
+    double current_to_next_scale = next_scale - current_scale;
+
+    AEGP_CompH compH = NULL;
+    err = suites.LayerSuite9()->AEGP_GetLayerParentComp(layerH, &compH);
+    if (!err && compH) {
+        AEGP_ItemH itemH = NULL;
+        err = suites.CompSuite11()->AEGP_GetItemFromComp(compH, &itemH);
+
+        A_long width = 0, height = 0;
+        if (!err && itemH) {
+            err = suites.ItemSuite9()->AEGP_GetItemDimensions(itemH, &width, &height);
+
+            if (!err) {
+                double scale_change = fabs(current_to_next_scale) > fabs(prev_to_current_scale) ?
+                    current_to_next_scale : prev_to_current_scale;
+
+                float max_dimension = MAX(width, height) * 0.5f;
+                float displacement = max_dimension * scale_change;
+
+                *scale_velocity_out = displacement * 3.0;
+
+                if (fabs(*scale_velocity_out) > 0.01f) {
+                    found_motion = true;
+                }
+            }
+        }
+    }
+}
 
         if (strstr(match_name, "DKT Random Displacement")) {
             double magnitude = 0.0;
@@ -2836,8 +3459,257 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 }
             }
         }
+        if (strstr(match_name, "DKT Transform")) {
+            float x_pos = 0.0f;
+            float y_pos = 0.0f;
+            float rotation = 0.0f;
+            float scale = 100.0f;
+            bool x_tiles = false;
+            bool y_tiles = false;
+            bool mirror = false;
 
+            A_long num_params = 0;
+            err = suites.StreamSuite5()->AEGP_GetEffectNumParamStreams(effectH, &num_params);
+            if (err) {
+                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+                continue;
+            }
 
+            const int POSITION_PARAM = 1;
+            const int ROTATION_PARAM = 2;
+            const int SCALE_PARAM = 3;
+            const int X_TILES_PARAM = 5;
+            const int Y_TILES_PARAM = 6;
+            const int MIRROR_PARAM = 7;
+
+            if (num_params < 8) {
+                suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
+                continue;
+            }
+
+            AEGP_StreamRefH streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, POSITION_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    x_pos = value.val.two_d.x;
+                    y_pos = value.val.two_d.y;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ROTATION_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    rotation = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SCALE_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    scale = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, X_TILES_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    x_tiles = (value.val.one_d > 0.5);
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, Y_TILES_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    y_tiles = (value.val.one_d > 0.5);
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, MIRROR_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &current_time, FALSE, &value);
+                if (!err) {
+                    mirror = (value.val.one_d > 0.5);
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            float prev_x_pos = x_pos, prev_y_pos = y_pos, prev_rotation = rotation, prev_scale = scale;
+            float next_x_pos = x_pos, next_y_pos = y_pos, next_rotation = rotation, next_scale = scale;
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, POSITION_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_x_pos = value.val.two_d.x;
+                    prev_y_pos = value.val.two_d.y;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_x_pos = value.val.two_d.x;
+                    next_y_pos = value.val.two_d.y;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, ROTATION_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_rotation = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_rotation = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            streamH = NULL;
+            err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(NULL, effectH, SCALE_PARAM, &streamH);
+            if (!err && streamH) {
+                AEGP_StreamValue2 value;
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &prev_time, FALSE, &value);
+                if (!err) {
+                    prev_scale = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+
+                err = suites.StreamSuite5()->AEGP_GetNewStreamValue(NULL, streamH, AEGP_LTimeMode_LayerTime,
+                    &next_time, FALSE, &value);
+                if (!err) {
+                    next_scale = value.val.one_d;
+                    suites.StreamSuite5()->AEGP_DisposeStreamValue(&value);
+                }
+                suites.StreamSuite5()->AEGP_DisposeStream(streamH);
+            }
+
+            double prev_to_current_x = x_pos - prev_x_pos;
+            double prev_to_current_y = y_pos - prev_y_pos;
+            double current_to_next_x = next_x_pos - x_pos;
+            double current_to_next_y = next_y_pos - y_pos;
+
+            double prev_to_current_magnitude = sqrt(prev_to_current_x * prev_to_current_x + prev_to_current_y * prev_to_current_y);
+            double current_to_next_magnitude = sqrt(current_to_next_x * current_to_next_x + current_to_next_y * current_to_next_y);
+
+            if (current_to_next_magnitude > prev_to_current_magnitude) {
+                *motion_x += current_to_next_x;
+                *motion_y += current_to_next_y;
+            }
+            else {
+                *motion_x += prev_to_current_x;
+                *motion_y += prev_to_current_y;
+            }
+
+            double prev_to_current_rotation = rotation - prev_rotation;
+            double current_to_next_rotation = next_rotation - rotation;
+
+            if (prev_to_current_rotation > 180.0) prev_to_current_rotation -= 360.0;
+            if (prev_to_current_rotation < -180.0) prev_to_current_rotation += 360.0;
+            if (current_to_next_rotation > 180.0) current_to_next_rotation -= 360.0;
+            if (current_to_next_rotation < -180.0) current_to_next_rotation += 360.0;
+
+            double rotation_change = fabs(current_to_next_rotation) > fabs(prev_to_current_rotation) ?
+                current_to_next_rotation : prev_to_current_rotation;
+
+            *rotation_angle += rotation_change * M_PI / 180.0;
+
+            double prev_to_current_scale = scale - prev_scale;
+            double current_to_next_scale = next_scale - scale;
+
+            double scale_change = fabs(current_to_next_scale) > fabs(prev_to_current_scale) ?
+                current_to_next_scale : prev_to_current_scale;
+
+            *scale_x = scale_change / 100.0;
+            *scale_y = scale_change / 100.0;
+
+            AEGP_CompH compH = NULL;
+            err = suites.LayerSuite9()->AEGP_GetLayerParentComp(layerH, &compH);
+            if (!err && compH) {
+                AEGP_ItemH itemH = NULL;
+                err = suites.CompSuite11()->AEGP_GetItemFromComp(compH, &itemH);
+
+                A_long width = 0, height = 0;
+                if (!err && itemH) {
+                    err = suites.ItemSuite9()->AEGP_GetItemDimensions(itemH, &width, &height);
+
+                    if (!err) {
+                        float layer_width = (float)width;
+                        float layer_height = (float)height;
+
+                        float current_size = sqrt(pow(layer_width * (scale / 100.0f), 2) +
+                            pow(layer_height * (scale / 100.0f), 2));
+
+                        float prev_size = sqrt(pow(layer_width * (prev_scale / 100.0f), 2) +
+                            pow(layer_height * (prev_scale / 100.0f), 2));
+
+                        float next_size = sqrt(pow(layer_width * (next_scale / 100.0f), 2) +
+                            pow(layer_height * (next_scale / 100.0f), 2));
+
+                        if (fabs(next_size - current_size) > fabs(current_size - prev_size)) {
+                            *scale_velocity_out = next_size - current_size;
+                        }
+                        else {
+                            *scale_velocity_out = current_size - prev_size;
+                        }
+
+                        *scale_velocity_out *= 1.6f;
+                    }
+                }
+            }
+
+            if (fabs(*motion_x) > 0.01 || fabs(*motion_y) > 0.01 ||
+                fabs(*rotation_angle) > 0.01 || fabs(*scale_velocity_out) > 0.01f) {
+                found_motion = true;
+            }
+        }
 
         suites.EffectSuite4()->AEGP_DisposeEffect(effectH);
     }
