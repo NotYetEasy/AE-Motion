@@ -48,16 +48,25 @@
 
 enum {
 	SWING_INPUT = 0,
+	SWING_NORMAL_CHECKBOX,
 	SWING_FREQ,
 	SWING_ANGLE1,
 	SWING_ANGLE2,
 	SWING_PHASE,
 	SWING_WAVE_TYPE,
-	SWING_TILES_GROUP,         
+	SWING_TILES_GROUP,
 	SWING_X_TILES,
 	SWING_Y_TILES,
 	SWING_MIRROR,
-	SWING_TILES_GROUP_END,     
+	SWING_TILES_GROUP_END,
+	SWING_COMPATIBILITY_GROUP,
+	SWING_COMPATIBILITY_CHECKBOX,
+	SWING_COMPATIBILITY_FREQUENCY,
+	SWING_COMPATIBILITY_ANGLE1,
+	SWING_COMPATIBILITY_ANGLE2,
+	SWING_COMPATIBILITY_PHASE,
+	SWING_COMPATIBILITY_WAVE_TYPE,
+	SWING_COMPATIBILITY_GROUP_END,
 	SWING_NUM_PARAMS
 };
 
@@ -69,8 +78,16 @@ enum {
 	WAVE_TYPE_DISK_ID,
 	X_TILES_DISK_ID,
 	Y_TILES_DISK_ID,
-	MIRROR_DISK_ID
+	MIRROR_DISK_ID,
+	NORMAL_CHECKBOX_ID,
+	COMPATIBILITY_CHECKBOX_ID,
+	COMPATIBILITY_FREQUENCY_DISK_ID,
+	COMPATIBILITY_ANGLE1_DISK_ID,
+	COMPATIBILITY_ANGLE2_DISK_ID,
+	COMPATIBILITY_PHASE_DISK_ID,
+	COMPATIBILITY_WAVE_TYPE_DISK_ID
 };
+
 
 extern "C" {
 	DllExport
@@ -111,7 +128,15 @@ typedef struct {
 	bool y_tiles;
 	bool mirror;
 	double current_time;
-	double layer_start_seconds; 
+	double layer_start_seconds;
+	double accumulated_phase;
+	bool normal_enabled;
+	bool compatibility_enabled;
+	double compat_frequency;
+	double compat_angle1;
+	double compat_angle2;
+	double compat_phase;
+	A_long compat_wave_type;
 } SwingParams;
 
 struct OpenCLGPUData

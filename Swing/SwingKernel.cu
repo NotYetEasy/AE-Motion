@@ -60,25 +60,68 @@ GF_KERNEL_FUNCTION(SwingKernel,
     ((int)(inWaveType))
     ((int)(inXTiles))
     ((int)(inYTiles))
-    ((int)(inMirror)),
+    ((int)(inMirror))
+    ((float)(inAccumulatedPhase))
+    ((int)(inHasFrequencyKeyframes))
+    ((int)(inNormalEnabled))
+    ((int)(inCompatibilityEnabled))
+    ((float)(inCompatFrequency))
+    ((float)(inCompatAngle1))
+    ((float)(inCompatAngle2))
+    ((float)(inCompatPhase))
+    ((int)(inCompatWaveType)),
     ((uint2)(inXY)(KERNEL_XY)))
 {
     if (inXY.x < inWidth && inXY.y < inHeight)
     {
-        float effectivePhase = inPhase + (inTime * inFrequency);
+        if ((inNormalEnabled && inCompatibilityEnabled) || (!inNormalEnabled && !inCompatibilityEnabled)) {
+            float4 pixel = ReadFloat4(inSrc, inXY.y * inSrcPitch + inXY.x, !!in16f);
+            WriteFloat4(pixel, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+            return;
+        }
 
+        float effectivePhase;
         float m;
-        if (inWaveType == 0) {   
-            m = sin(effectivePhase * 3.14159265f);
-        }
-        else {   
-            m = triangleWave(effectivePhase / 2.0f);
-        }
+        float angleRad;
 
-        float t = (m + 1.0f) / 2.0f;
+        if (inCompatibilityEnabled) {
+            if (inCompatWaveType == 0) {  
+                m = sin(((inTime * inCompatFrequency) + inCompatPhase) * 3.14159265f);
+            }
+            else {  
+                m = triangleWave(((inTime * inCompatFrequency) + inCompatPhase) / 2.0f);
+            }
 
-        float finalAngle = -(inAngle1 + t * (inAngle2 - inAngle1));
-        float angleRad = finalAngle * 0.01745329f;  
+            float finalAngle = ((inCompatAngle2 - inCompatAngle1) * ((m + 1.0f) / 2.0f)) + inCompatAngle1;
+            angleRad = -finalAngle * 0.01745329f;    
+        }
+        else {
+            if (inHasFrequencyKeyframes && inAccumulatedPhase > 0.0f) {
+                effectivePhase = inPhase + inAccumulatedPhase;
+
+                if (inWaveType == 0) {
+                    m = sin(effectivePhase * 3.14159265f);
+                }
+                else {
+                    m = triangleWave(effectivePhase / 2.0f);
+                }
+            }
+            else {
+                effectivePhase = inPhase + (inTime * inFrequency);
+
+                if (inWaveType == 0) {
+                    m = sin(effectivePhase * 3.14159265f);
+                }
+                else {
+                    m = triangleWave(effectivePhase / 2.0f);
+                }
+            }
+
+            float t = (m + 1.0f) / 2.0f;
+
+            float finalAngle = -(inAngle1 + t * (inAngle2 - inAngle1));
+            angleRad = finalAngle * 0.01745329f;    
+        }
 
         float centerX = inWidth / 2.0f;
         float centerY = inHeight / 2.0f;
@@ -193,14 +236,26 @@ void Swing_CUDA(
     int waveType,
     int xTiles,
     int yTiles,
-    int mirror)
+    int mirror,
+    float accumulatedPhase,
+    int hasFrequencyKeyframes,
+    int normalEnabled,
+    int compatibilityEnabled,
+    float compatFrequency,
+    float compatAngle1,
+    float compatAngle2,
+    float compatPhase,
+    int compatWaveType)
 {
     dim3 blockDim(16, 16, 1);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
 
-    SwingKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst, srcPitch, dstPitch, is16f, width, height, frequency, angle1, angle2, phase, time, waveType, xTiles, yTiles, mirror);
+    SwingKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst, srcPitch, dstPitch, is16f, width, height,
+        frequency, angle1, angle2, phase, time, waveType, xTiles, yTiles, mirror,
+        accumulatedPhase, hasFrequencyKeyframes, normalEnabled, compatibilityEnabled,
+        compatFrequency, compatAngle1, compatAngle2, compatPhase, compatWaveType);
 
     cudaDeviceSynchronize();
 }
-#endif  
+#endif
 #endif 
