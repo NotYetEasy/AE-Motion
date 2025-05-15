@@ -64,12 +64,14 @@ GF_KERNEL_FUNCTION(OscillateKernel,
     ((int)(inMirror))
     ((float)(inDownsampleX))
     ((float)(inDownsampleY))
-    ((int)(inCompatibilityEnabled))     
-    ((float)(inCompatAngle))            
-    ((float)(inCompatFrequency))        
-    ((float)(inCompatMagnitude))        
-    ((int)(inCompatWaveType))            
-    ((int)(inNormalEnabled)),            
+    ((int)(inCompatibilityEnabled))
+    ((float)(inCompatAngle))
+    ((float)(inCompatFrequency))
+    ((float)(inCompatMagnitude))
+    ((int)(inCompatWaveType))
+    ((int)(inNormalEnabled))
+    ((float)(inAccumulatedPhase))
+    ((int)(inHasFrequencyKeyframes)),
     ((uint2)(inXY)(KERNEL_XY)))
 {
     if (inXY.x < inWidth && inXY.y < inHeight)
@@ -104,50 +106,74 @@ GF_KERNEL_FUNCTION(OscillateKernel,
                 m = TriangleWaveDevice(wavePhase);
             }
 
-            offsetX = dx * inCompatMagnitude * m;
-            offsetY = dy * inCompatMagnitude * m;
+            offsetX = dx * inCompatMagnitude * m * inDownsampleX;
+            offsetY = dy * inCompatMagnitude * m * inDownsampleY;
         }
         else if (inNormalEnabled) {
-            float X;
-            float m;
-
-            if (inWaveType == 0) {
-                X = (inFrequency * 2.0f * inCurrentTime) + (inPhase * 2.0f);
-                m = sin(X * 3.14159f);
-            }
-            else {
-                X = ((inFrequency * 2.0f * inCurrentTime) + (inPhase * 2.0f)) / 2.0f + inPhase;
-                m = TriangleWaveDevice(X);
-            }
-
             float angleRad = inAngle * 3.14159f / 180.0f;
             float dx = cos(angleRad);
             float dy = sin(angleRad);
 
+            float X;
+            float m;
+
+            if (inHasFrequencyKeyframes && inAccumulatedPhase > 0.0f) {
+                if (inWaveType == 0) {
+                    X = ((inAccumulatedPhase * 2.0f + inPhase * 2.0f) * 3.14159f);
+                    m = sin(X);
+                }
+                else {
+                    X = ((inAccumulatedPhase * 2.0f) + (inPhase * 2.0f)) / 2.0f + inPhase;
+                    m = TriangleWaveDevice(X);
+                }
+            }
+            else {
+                if (inWaveType == 0) {
+                    X = (inFrequency * 2.0f * inCurrentTime) + (inPhase * 2.0f);
+                    m = sin(X * 3.14159f);
+                }
+                else {
+                    X = ((inFrequency * 2.0f * inCurrentTime) + (inPhase * 2.0f)) / 2.0f + inPhase;
+                    m = TriangleWaveDevice(X);
+                }
+            }
+
             switch (inDirection) {
-            case 0:       
+            case 0:
                 offsetX = dx * (inMagnitude * inDownsampleX) * m;
                 offsetY = dy * (inMagnitude * inDownsampleY) * m;
                 break;
 
-            case 1:      
+            case 1:
                 scale = 100.0f - (inMagnitude * m * 0.1f);
                 break;
 
-            case 2: {        
+            case 2: {
                 offsetX = dx * (inMagnitude * inDownsampleX) * m;
                 offsetY = dy * (inMagnitude * inDownsampleY) * m;
 
                 float phaseShift = inWaveType == 0 ? 0.25f : 0.125f;
                 float X2;
 
-                if (inWaveType == 0) {
-                    X2 = (inFrequency * 2.0f * inCurrentTime) + ((inPhase + phaseShift) * 2.0f);
-                    m = sin(X2 * 3.14159f);
+                if (inHasFrequencyKeyframes && inAccumulatedPhase > 0.0f) {
+                    if (inWaveType == 0) {
+                        X2 = ((inAccumulatedPhase * 2.0f + (inPhase + phaseShift) * 2.0f) * 3.14159f);
+                        m = sin(X2);
+                    }
+                    else {
+                        X2 = ((inAccumulatedPhase * 2.0f) + ((inPhase + phaseShift) * 2.0f)) / 2.0f + (inPhase + phaseShift);
+                        m = TriangleWaveDevice(X2);
+                    }
                 }
                 else {
-                    X2 = ((inFrequency * 2.0f * inCurrentTime) + ((inPhase + phaseShift) * 2.0f)) / 2.0f + (inPhase + phaseShift);
-                    m = TriangleWaveDevice(X2);
+                    if (inWaveType == 0) {
+                        X2 = (inFrequency * 2.0f * inCurrentTime) + ((inPhase + phaseShift) * 2.0f);
+                        m = sin(X2 * 3.14159f);
+                    }
+                    else {
+                        X2 = ((inFrequency * 2.0f * inCurrentTime) + ((inPhase + phaseShift) * 2.0f)) / 2.0f + (inPhase + phaseShift);
+                        m = TriangleWaveDevice(X2);
+                    }
                 }
                 scale = 100.0f - (inMagnitude * m * 0.1f);
                 break;
@@ -269,21 +295,24 @@ void Oscillate_CUDA(
     int mirror,
     float downsample_x,
     float downsample_y,
-    int compatibilityEnabled,     
-    float compatAngle,            
-    float compatFrequency,        
-    float compatMagnitude,        
-    int compatWaveType,            
-    int normalEnabled)             
+    int compatibilityEnabled,
+    float compatAngle,
+    float compatFrequency,
+    float compatMagnitude,
+    int compatWaveType,
+    int normalEnabled,
+    float accumulatedPhase,
+    int hasFrequencyKeyframes)
 {
     dim3 blockDim(16, 16, 1);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
 
     OscillateKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst, srcPitch, dstPitch, is16f, width, height,
         angle, frequency, magnitude, direction, waveType, phase, currentTime, xTiles, yTiles, mirror,
-        downsample_x, downsample_y, compatibilityEnabled, compatAngle, compatFrequency, compatMagnitude, compatWaveType, normalEnabled);
+        downsample_x, downsample_y, compatibilityEnabled, compatAngle, compatFrequency, compatMagnitude, compatWaveType, normalEnabled,
+        accumulatedPhase, hasFrequencyKeyframes);
 
     cudaDeviceSynchronize();
 }
-#endif  
+#endif
 #endif

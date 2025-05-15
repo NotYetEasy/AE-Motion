@@ -139,10 +139,22 @@ typedef struct {
     PF_EffectWorld* output_worldP;
 } ThreadRenderData;
 
+struct FrequencyAccumulator {
+    float accumulated_phase;
+    bool initialized;
+
+    FrequencyAccumulator() : accumulated_phase(0.0f), initialized(false) {}
+};
+
 typedef struct {
     RandomMoveInfo info;
-    PF_FpLong layer_start_seconds;
+    PF_FpLong prev_time;
     PF_FpLong current_time;
+    PF_FpLong duration;
+    PF_FpLong layer_start_seconds;
+    PF_FpLong accumulated_phase;
+    bool accumulated_phase_initialized;
+    bool has_frequency_keyframes;
 } OscillateRenderData;
 
 #endif  

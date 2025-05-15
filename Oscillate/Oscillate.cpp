@@ -1,4 +1,4 @@
-#if HAS_CUDA
+﻿#if HAS_CUDA
 #include <cuda_runtime.h>
 
 #undef MAJOR_VERSION
@@ -48,7 +48,10 @@ extern void Oscillate_CUDA(
 	float compatFrequency,
 	float compatMagnitude,
 	int compatWaveType,
-	int normalEnabled);                     
+	int normalEnabled,
+	float accumulatedPhase,
+	int hasFrequencyKeyframes);
+
 
 static PF_Err
 About(
@@ -575,6 +578,137 @@ GPUDeviceSetdown(
 	return err;
 }
 
+
+PF_Err valueAtTime(
+	PF_InData* in_data,
+	int stream_index,
+	float time_secs,
+	PF_FpLong* value_out)
+{
+	PF_Err err = PF_Err_NONE;
+
+	AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+	AEGP_EffectRefH aegp_effect_ref = NULL;
+	AEGP_StreamRefH stream_ref = NULL;
+
+	A_Time time;
+	time.value = (A_long)(time_secs * in_data->time_scale);
+	time.scale = in_data->time_scale;
+
+	if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+		err = suites.PFInterfaceSuite1()->AEGP_GetNewEffectForEffect(
+			NULL,
+			in_data->effect_ref,
+			&aegp_effect_ref);
+
+		if (!err && aegp_effect_ref) {
+			err = suites.StreamSuite5()->AEGP_GetNewEffectStreamByIndex(
+				NULL,
+				aegp_effect_ref,
+				stream_index,
+				&stream_ref);
+
+			if (!err && stream_ref) {
+				AEGP_StreamValue2 stream_value;
+				err = suites.StreamSuite5()->AEGP_GetNewStreamValue(
+					NULL,      
+					stream_ref,
+					AEGP_LTimeMode_LayerTime,
+					&time,
+					FALSE,      
+					&stream_value);
+
+				if (!err) {
+					AEGP_StreamType stream_type;
+					err = suites.StreamSuite5()->AEGP_GetStreamType(stream_ref, &stream_type);
+
+					if (!err) {
+						switch (stream_type) {
+						case AEGP_StreamType_OneD:
+							*value_out = stream_value.val.one_d;
+							break;
+
+						case AEGP_StreamType_TwoD:
+						case AEGP_StreamType_TwoD_SPATIAL:
+							*value_out = stream_value.val.two_d.x;
+							break;
+
+						case AEGP_StreamType_ThreeD:
+						case AEGP_StreamType_ThreeD_SPATIAL:
+							*value_out = stream_value.val.three_d.x;
+							break;
+
+						case AEGP_StreamType_COLOR:
+							*value_out = stream_value.val.color.redF;
+							break;
+
+						default:
+							err = PF_Err_BAD_CALLBACK_PARAM;
+							break;
+						}
+					}
+
+					suites.StreamSuite5()->AEGP_DisposeStreamValue(&stream_value);
+				}
+
+				suites.StreamSuite5()->AEGP_DisposeStream(stream_ref);
+			}
+
+			suites.EffectSuite4()->AEGP_DisposeEffect(aegp_effect_ref);
+		}
+	}
+
+	return err;
+}
+
+static PF_Err
+valueAtTimeHz(
+	PF_InData* in_data,
+	int stream_index,
+	float time_secs,
+	float duration,
+	OscillateRenderData* renderData,
+	PF_FpLong* value_out)
+{
+	PF_Err err = PF_Err_NONE;
+
+	err = valueAtTime(in_data, stream_index, time_secs, value_out);
+	if (err) return err;
+
+	if (stream_index == FREQUENCY_SLIDER) {
+		bool isKeyed = HasAnyFrequencyKeyframes(in_data);
+
+		bool isHz = true;              
+
+		if (isHz && isKeyed) {
+			float fps = 120.0f;
+			int totalSteps = (int)roundf(duration * fps);
+			int curSteps = (int)roundf(fps * time_secs);
+
+			if (!renderData->accumulated_phase_initialized) {
+				renderData->accumulated_phase = 0.0f;
+				renderData->accumulated_phase_initialized = true;
+			}
+
+			if (curSteps >= 0) {
+				renderData->accumulated_phase = 0.0f;
+				for (int i = 0; i <= curSteps; i++) {
+					PF_FpLong stepValue;
+					err = valueAtTime(in_data, stream_index, i / fps, &stepValue);
+					if (err) return err;
+
+					renderData->accumulated_phase += stepValue / fps;
+				}
+
+				*value_out = renderData->accumulated_phase;
+			}
+		}
+	}
+
+	return err;
+}
+
 static PF_FpLong TriangleWave(PF_FpLong t)
 {
 	t = fmod(t + 0.75, 1.0);
@@ -585,195 +719,34 @@ static PF_FpLong TriangleWave(PF_FpLong t)
 	return (fabs(t - 0.5) - 0.25) * 4.0;
 }
 
-static PF_FpLong CalculateWaveValue(int wave_type, PF_FpLong frequency, PF_FpLong current_time, PF_FpLong phase)
+static PF_FpLong CalculateWaveValue(int wave_type, PF_FpLong frequency, PF_FpLong current_time, PF_FpLong phase, PF_FpLong accumulated_phase = 0.0)
 {
 	PF_FpLong X, m;
 
-	if (wave_type == 0) {
-		X = (frequency * 2.0 * current_time) + (phase * 2.0);
-		m = sin(X * M_PI);
+	if (accumulated_phase > 0.0) {
+		if (wave_type == 0) {  
+			X = ((accumulated_phase * 2.0 + phase * 2.0) * 3.14159);
+			m = sin(X);
+		}
+		else {  
+			X = ((accumulated_phase * 2.0) + (phase * 2.0)) / 2.0 + phase;
+			m = TriangleWave(X);
+		}
 	}
 	else {
-		X = ((frequency * 2.0 * current_time) + (phase * 2.0)) / 2.0 + phase;
-		m = TriangleWave(X);
+		if (wave_type == 0) {  
+			X = (frequency * 2.0 * current_time) + (phase * 2.0);
+			m = sin(X * M_PI);
+		}
+		else {  
+			X = ((frequency * 2.0 * current_time) + (phase * 2.0)) / 2.0 + phase;
+			m = TriangleWave(X);
+		}
 	}
 
 	return m;
 }
 
-
-static void
-DisposePreRenderData(
-	void* pre_render_dataPV)
-{
-	if (pre_render_dataPV) {
-		OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(pre_render_dataPV);
-		free(renderData);
-	}
-}
-
-
-static PF_Err
-SmartPreRender(
-	PF_InData* in_data,
-	PF_OutData* out_data,
-	PF_PreRenderExtra* extra)
-{
-	PF_Err err = PF_Err_NONE;
-	PF_CheckoutResult in_result;
-	PF_RenderRequest req = extra->input->output_request;
-
-	extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
-
-	OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(malloc(sizeof(OscillateRenderData)));
-	AEFX_CLR_STRUCT(*renderData);
-
-	if (renderData) {
-		PF_ParamDef param_copy;
-		AEFX_CLR_STRUCT(param_copy);
-
-		ERR(PF_CHECKOUT_PARAM(in_data, NORMAL_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.normal = param_copy.u.bd.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility = param_copy.u.bd.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, DIRECTION_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.direction = param_copy.u.pd.value - 1;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, ANGLE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) {
-			renderData->info.angle = (PF_FpLong)(param_copy.u.ad.value) / 65536.0;
-		}
-
-		ERR(PF_CHECKOUT_PARAM(in_data, FREQUENCY_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.frequency = param_copy.u.fs_d.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, MAGNITUDE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.magnitude = param_copy.u.fs_d.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, WAVE_TYPE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.wave_type = param_copy.u.pd.value - 1;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, PHASE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.phase = param_copy.u.fs_d.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.x_tiles = param_copy.u.bd.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.y_tiles = param_copy.u.bd.value;
-
-		ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.mirror = param_copy.u.bd.value;
-
-		if (renderData->info.compatibility) {
-			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_ANGLE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-			if (!err) renderData->info.compat_angle = param_copy.u.fs_d.value;
-
-			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_FREQUENCY_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-			if (!err) renderData->info.compat_frequency = param_copy.u.fs_d.value;
-
-			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_MAGNITUDE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-			if (!err) renderData->info.compat_magnitude = param_copy.u.fs_d.value;
-
-			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_WAVE_TYPE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-			if (!err) renderData->info.compat_wave_type = param_copy.u.pd.value - 1;
-		}
-
-		bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
-
-		AEGP_LayerIDVal layer_id = 0;
-		AEGP_SuiteHandler suites(in_data->pica_basicP);
-
-		PF_FpLong layer_time_offset = 0;
-		A_Ratio stretch_factor = { 1, 1 };      
-
-		if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
-			AEGP_LayerH layer = NULL;
-
-			err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
-
-			if (!err && layer) {
-				err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
-
-				A_Time in_point;
-				err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
-
-				if (!err) {
-					layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
-					renderData->layer_start_seconds = layer_time_offset;
-				}
-
-				err = suites.LayerSuite9()->AEGP_GetLayerStretch(layer, &stretch_factor);
-			}
-		}
-
-		A_long time_offset = 0;
-		if (has_frequency_keyframes) {
-			time_offset = in_data->time_step / 2;      
-		}
-
-		PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
-
-		PF_FpLong stretch_ratio = (PF_FpLong)stretch_factor.num / (PF_FpLong)stretch_factor.den;
-
-		if (has_frequency_keyframes) {
-			A_long time_shift = in_data->time_step / 2;
-
-			A_Time shifted_time;
-			shifted_time.value = in_data->current_time + time_shift;
-			shifted_time.scale = in_data->time_scale;
-
-			current_time = (PF_FpLong)shifted_time.value / (PF_FpLong)shifted_time.scale;
-		}
-
-		current_time -= layer_time_offset;
-
-		current_time *= stretch_ratio;
-
-		renderData->current_time = current_time;
-
-		extra->output->pre_render_data = renderData;
-		extra->output->delete_pre_render_data_func = DisposePreRenderData;
-
-		ERR(extra->cb->checkout_layer(in_data->effect_ref,
-			RANDOMMOVE_INPUT,
-			RANDOMMOVE_INPUT,
-			&req,
-			in_data->current_time,
-			in_data->time_step,
-			in_data->time_scale,
-			&in_result));
-
-		if (!err) {
-			struct {
-				A_u_char has_frequency_keyframes;
-				A_long time_offset;
-				AEGP_LayerIDVal layer_id;        
-				A_Ratio stretch_factor;       
-				RandomMoveInfo info;
-			} detection_data;
-
-			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
-			detection_data.time_offset = time_offset;
-			detection_data.layer_id = layer_id;     
-			detection_data.stretch_factor = stretch_factor;     
-			detection_data.info = renderData->info;
-
-			ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
-
-			extra->output->max_result_rect = in_result.max_result_rect;
-			extra->output->result_rect = in_result.result_rect;
-			extra->output->solid = FALSE;
-		}
-	}
-	else {
-		err = PF_Err_OUT_OF_MEMORY;
-	}
-
-	return err;
-}
 
 template <typename PixelType>
 static PixelType
@@ -931,6 +904,190 @@ SampleBilinear(PixelType* src, PF_FpLong x, PF_FpLong y, A_long width, A_long he
 	return result;
 }
 
+static void
+DisposePreRenderData(
+	void* pre_render_dataPV)
+{
+	if (pre_render_dataPV) {
+		OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(pre_render_dataPV);
+		free(renderData);
+	}
+}
+
+
+static PF_Err
+SmartPreRender(
+	PF_InData* in_data,
+	PF_OutData* out_data,
+	PF_PreRenderExtra* extra)
+{
+	PF_Err err = PF_Err_NONE;
+	PF_CheckoutResult in_result;
+	PF_RenderRequest req = extra->input->output_request;
+
+	extra->output->flags |= PF_RenderOutputFlag_GPU_RENDER_POSSIBLE;
+
+	OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(malloc(sizeof(OscillateRenderData)));
+	AEFX_CLR_STRUCT(*renderData);
+
+	if (renderData) {
+		PF_ParamDef param_copy;
+		AEFX_CLR_STRUCT(param_copy);
+
+		ERR(PF_CHECKOUT_PARAM(in_data, NORMAL_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.normal = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_CHECKBOX_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.compatibility = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, DIRECTION_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.direction = param_copy.u.pd.value - 1;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, ANGLE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) {
+			renderData->info.angle = (PF_FpLong)(param_copy.u.ad.value) / 65536.0;
+		}
+
+		bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
+		renderData->has_frequency_keyframes = has_frequency_keyframes;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, FREQUENCY_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) {
+			renderData->info.frequency = param_copy.u.fs_d.value;
+		}
+
+		ERR(PF_CHECKOUT_PARAM(in_data, MAGNITUDE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.magnitude = param_copy.u.fs_d.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, WAVE_TYPE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.wave_type = param_copy.u.pd.value - 1;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, PHASE_SLIDER, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.phase = param_copy.u.fs_d.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.x_tiles = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.y_tiles = param_copy.u.bd.value;
+
+		ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+		if (!err) renderData->info.mirror = param_copy.u.bd.value;
+
+		if (renderData->info.compatibility) {
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_ANGLE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_angle = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_FREQUENCY_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_frequency = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_MAGNITUDE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_magnitude = param_copy.u.fs_d.value;
+
+			ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_WAVE_TYPE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
+			if (!err) renderData->info.compat_wave_type = param_copy.u.pd.value - 1;
+		}
+
+		AEGP_LayerIDVal layer_id = 0;
+		AEGP_SuiteHandler suites(in_data->pica_basicP);
+
+		PF_FpLong layer_time_offset = 0;
+		A_Ratio stretch_factor = { 1, 1 };
+
+		if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
+			AEGP_LayerH layer = NULL;
+
+			err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
+
+			if (!err && layer) {
+				err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
+
+				A_Time in_point;
+				err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
+
+				if (!err) {
+					layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
+					renderData->layer_start_seconds = layer_time_offset;
+				}
+
+				err = suites.LayerSuite9()->AEGP_GetLayerStretch(layer, &stretch_factor);
+			}
+		}
+
+		A_long time_offset = 0;
+
+		PF_FpLong current_time = (PF_FpLong)in_data->current_time / (PF_FpLong)in_data->time_scale;
+		PF_FpLong prev_time = current_time - ((PF_FpLong)in_data->time_step / (PF_FpLong)in_data->time_scale);
+		PF_FpLong duration = current_time;
+
+		PF_FpLong stretch_ratio = (PF_FpLong)stretch_factor.num / (PF_FpLong)stretch_factor.den;
+
+		current_time -= layer_time_offset;
+		prev_time -= layer_time_offset;
+		duration -= layer_time_offset;
+
+		current_time *= stretch_ratio;
+		prev_time *= stretch_ratio;
+		duration *= stretch_ratio;
+
+		renderData->prev_time = prev_time;
+		renderData->current_time = current_time;
+		renderData->duration = duration;
+
+		renderData->accumulated_phase = 0.0f;
+		renderData->accumulated_phase_initialized = false;
+
+		if (has_frequency_keyframes && renderData->info.frequency > 0) {
+			PF_FpLong accumulated_phase;
+			err = valueAtTimeHz(in_data, FREQUENCY_SLIDER, current_time, duration, renderData, &accumulated_phase);
+			if (!err) {
+				renderData->accumulated_phase = accumulated_phase;
+				renderData->accumulated_phase_initialized = true;
+			}
+		}
+
+		extra->output->pre_render_data = renderData;
+		extra->output->delete_pre_render_data_func = DisposePreRenderData;
+
+		ERR(extra->cb->checkout_layer(in_data->effect_ref,
+			RANDOMMOVE_INPUT,
+			RANDOMMOVE_INPUT,
+			&req,
+			in_data->current_time,
+			in_data->time_step,
+			in_data->time_scale,
+			&in_result));
+
+		if (!err) {
+			struct {
+				A_u_char has_frequency_keyframes;
+				A_long time_offset;
+				AEGP_LayerIDVal layer_id;
+				A_Ratio stretch_factor;
+				RandomMoveInfo info;
+			} detection_data;
+
+			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
+			detection_data.time_offset = time_offset;
+			detection_data.layer_id = layer_id;
+			detection_data.stretch_factor = stretch_factor;
+			detection_data.info = renderData->info;
+
+			ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
+
+			extra->output->max_result_rect = in_result.max_result_rect;
+			extra->output->result_rect = in_result.result_rect;
+			extra->output->solid = FALSE;
+		}
+	}
+	else {
+		err = PF_Err_OUT_OF_MEMORY;
+	}
+
+	return err;
+}
+
+
 static PF_Err
 SmartRenderGPU(
 	PF_InData* in_dataP,
@@ -954,8 +1111,8 @@ SmartRenderGPU(
 	bool compatibility_enabled = infoP->compatibility;
 
 	if ((!normal_enabled && !compatibility_enabled) || (normal_enabled && compatibility_enabled)) {
-		infoP->magnitude = 0;          
-		infoP->frequency = 0;       
+		infoP->magnitude = 0;
+		infoP->frequency = 0;
 	}
 
 	AEFX_SuiteScoper<PF_GPUDeviceSuite1> gpu_suite = AEFX_SuiteScoper<PF_GPUDeviceSuite1>(in_dataP,
@@ -997,12 +1154,14 @@ SmartRenderGPU(
 		int mirror;
 		float downsample_x;
 		float downsample_y;
-		int compatibilityEnabled;     
-		float compatAngle;            
-		float compatFrequency;        
-		float compatMagnitude;        
-		int compatWaveType;            
-		int normalEnabled;             
+		int compatibilityEnabled;
+		float compatAngle;
+		float compatFrequency;
+		float compatMagnitude;
+		int compatWaveType;
+		int normalEnabled;
+		float accumulatedPhase;
+		int hasFrequencyKeyframes;
 	} OscillateParams;
 
 	OscillateParams params;
@@ -1025,12 +1184,23 @@ SmartRenderGPU(
 	params.downsample_x = downsample_factor_x;
 	params.downsample_y = downsample_factor_y;
 
-	params.normalEnabled = normal_enabled;     
+	params.normalEnabled = normal_enabled;
 	params.compatibilityEnabled = compatibility_enabled;
 	params.compatAngle = infoP->compat_angle;
 	params.compatFrequency = infoP->compat_frequency;
 	params.compatMagnitude = infoP->compat_magnitude;
 	params.compatWaveType = infoP->compat_wave_type;
+
+	OscillateRenderData* renderData = reinterpret_cast<OscillateRenderData*>(extraP->input->pre_render_data);
+
+	params.accumulatedPhase = 0.0f;
+	params.hasFrequencyKeyframes = 0;
+
+	if (renderData) {
+		params.accumulatedPhase = renderData->accumulated_phase;
+		params.hasFrequencyKeyframes = renderData->has_frequency_keyframes &&
+			renderData->accumulated_phase_initialized ? 1 : 0;
+	}
 
 	if (!err && extraP->input->what_gpu == PF_GPU_Framework_OPENCL)
 	{
@@ -1067,6 +1237,8 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.compatMagnitude));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.compatWaveType));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.normalEnabled));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(float), &params.accumulatedPhase));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->oscillate_kernel, param_index++, sizeof(int), &params.hasFrequencyKeyframes));
 
 		size_t threadBlock[2] = { 16, 16 };
 		size_t grid[2] = {
@@ -1112,7 +1284,9 @@ SmartRenderGPU(
 			params.compatFrequency,
 			params.compatMagnitude,
 			params.compatWaveType,
-			params.normalEnabled);      
+			params.normalEnabled,
+			params.accumulatedPhase,
+			params.hasFrequencyKeyframes);
 
 		if (cudaPeekAtLastError() != cudaSuccess) {
 			err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -1183,6 +1357,7 @@ SmartRenderGPU(
 	return err;
 }
 
+
 static PF_Err
 SmartRenderCPU(
 	PF_InData* in_data,
@@ -1191,7 +1366,8 @@ SmartRenderCPU(
 	PF_EffectWorld* input_worldP,
 	PF_EffectWorld* output_worldP,
 	RandomMoveInfo* infoP,
-	PF_FpLong current_time)
+	PF_FpLong current_time,
+	OscillateRenderData* renderData)
 {
 	PF_Err err = PF_Err_NONE;
 
@@ -1246,10 +1422,9 @@ SmartRenderCPU(
 	PF_FpLong m;
 
 	if (compatibility_enabled) {
-
 		angleRad = infoP->compat_angle * M_PI / 180.0;
-		dx = sin(angleRad);      
-		dy = cos(angleRad);      
+		dx = sin(angleRad);
+		dy = cos(angleRad);
 
 		PF_FpLong duration = 1.0;
 		PF_FpLong t = current_time;
@@ -1270,30 +1445,49 @@ SmartRenderCPU(
 		dx = cos(angleRad);
 		dy = sin(angleRad);
 
-		m = CalculateWaveValue(infoP->wave_type,
-			infoP->frequency,
-			current_time,
-			infoP->phase);
+		if (renderData && renderData->has_frequency_keyframes && renderData->accumulated_phase_initialized) {
+			m = CalculateWaveValue(infoP->wave_type,
+				infoP->frequency,
+				current_time,
+				infoP->phase,
+				renderData->accumulated_phase);
+		}
+		else {
+			m = CalculateWaveValue(infoP->wave_type,
+				infoP->frequency,
+				current_time,
+				infoP->phase);
+		}
 
 		switch (infoP->direction) {
-		case 0:       
+		case 0:
 			offsetX = dx * (infoP->magnitude * downsample_factor_x) * m;
 			offsetY = dy * (infoP->magnitude * downsample_factor_y) * m;
 			break;
 
-		case 1:      
+		case 1:
 			scale = 100.0 - (infoP->magnitude * m * 0.1);
 			break;
 
-		case 2: {        
+		case 2: {
 			offsetX = dx * (infoP->magnitude * downsample_factor_x) * m;
 			offsetY = dy * (infoP->magnitude * downsample_factor_y) * m;
 
 			PF_FpLong phaseShift = infoP->wave_type == 0 ? 0.25 : 0.125;
-			m = CalculateWaveValue(infoP->wave_type,
-				infoP->frequency,
-				current_time,
-				infoP->phase + phaseShift);
+
+			if (renderData && renderData->has_frequency_keyframes && renderData->accumulated_phase_initialized) {
+				m = CalculateWaveValue(infoP->wave_type,
+					infoP->frequency,
+					current_time,
+					infoP->phase,
+					renderData->accumulated_phase);
+			}
+			else {
+				m = CalculateWaveValue(infoP->wave_type,
+					infoP->frequency,
+					current_time,
+					infoP->phase + phaseShift);
+			}
 
 			scale = 100.0 - (infoP->magnitude * m * 0.1);
 			break;
@@ -1314,6 +1508,7 @@ SmartRenderCPU(
 
 	PF_FpLong scaleFactorX = 100.0 / scale;
 	PF_FpLong scaleFactorY = 100.0 / scale;
+
 
 	switch (pixel_format) {
 	case PF_PixelFormat_ARGB128: {
@@ -1416,7 +1611,7 @@ SmartRender(
 			ERR(SmartRenderGPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, &renderData->info, renderData->current_time));
 		}
 		else {
-			ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, &renderData->info, renderData->current_time));
+			ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, &renderData->info, renderData->current_time, renderData));
 		}
 		ERR2(extraP->cb->checkin_layer_pixels(in_data->effect_ref, RANDOMMOVE_INPUT));
 	}
@@ -1468,7 +1663,7 @@ Render(
 	PF_FpLong layer_time_offset = 0;
 	if (layer_id != 0 && layer != NULL) {
 		A_Time in_point;
-		err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_CompTime, &in_point);
+		err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
 
 		if (!err) {
 			layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
