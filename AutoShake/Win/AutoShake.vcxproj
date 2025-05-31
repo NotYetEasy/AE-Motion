@@ -319,6 +319,7 @@
   <ItemGroup>
     <ClInclude Include="..\..\..\Headers\AEFX_SuiteHandlerTemplate.h" />
     <ClInclude Include="..\..\..\Headers\AE_PluginData.h" />
+    <ClInclude Include="..\..\..\Util\AEFX_SuiteHelper.h" />
     <ClInclude Include="..\AutoShake.h" />
     <ClInclude Include="..\..\..\Util\Smart_Utils.h" />
     <ClInclude Include="..\..\..\Util\String_Utils.h" />
@@ -347,6 +348,7 @@
     <ClInclude Include="..\SimplexNoise.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\Util\AEFX_SuiteHelper.c" />
     <ClCompile Include="..\..\..\Util\DirectXUtils.cpp" />
     <ClCompile Include="..\..\..\Util\Smart_Utils.cpp" />
     <ClCompile Include="..\AEGP_SuiteHandler_MF.cpp" />

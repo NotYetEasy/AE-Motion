@@ -301,8 +301,8 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
     ((float)(inCompatibilitySeed))
     ((float)(inCompatibilityAngle))
     ((float)(inCompatibilitySlack))
-    ((float)(inAccumulatedPhase))  
-    ((int)(inHasFrequencyKeyframes)),  
+    ((float)(inAccumulatedPhase))  // New parameter for accumulated phase
+    ((int)(inHasFrequencyKeyframes)),  // New parameter for keyframe flag
     ((uint2)(inXY)(KERNEL_XY)))
 {
     if (inXY.x < inWidth && inXY.y < inHeight)
@@ -323,7 +323,7 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
             s = sin(angleRad);
             c = cos(angleRad);
 
-
+            // Use accumulated phase if available, otherwise use traditional calculation
             if (inHasFrequencyKeyframes != 0) {
                 evolutionValue = inEvolution - inAccumulatedPhase;
             }

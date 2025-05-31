@@ -81,7 +81,7 @@ GlobalSetup(
 	PF_ParamDef* params[],
 	PF_LayerDef* output)
 {
-	PF_Err	err = PF_Err_NONE;
+	PF_Err err = PF_Err_NONE;
 
 	out_data->my_version = PF_VERSION(MAJOR_VERSION,
 		MINOR_VERSION,
@@ -98,7 +98,6 @@ GlobalSetup(
 		PF_OutFlag2_I_MIX_GUID_DEPENDENCIES;
 
 	if (in_dataP->appl_id == 'PrMr') {
-
 		AEFX_SuiteScoper<PF_PixelFormatSuite1> pixelFormatSuite =
 			AEFX_SuiteScoper<PF_PixelFormatSuite1>(in_dataP,
 				kPFPixelFormatSuite,
@@ -286,7 +285,7 @@ ParamsSetup(
 		0.00,     
 		2000.00,  
 		0.00,      
-		2000.00,   
+		2.00,   
 		0.00,     
 		PF_Precision_HUNDREDTHS,
 		0,
@@ -477,7 +476,6 @@ valueAtTimeHz(
 			int totalSteps = (int)roundf(duration * fps);
 			int curSteps = (int)roundf(fps * time_secs);
 
-
 			if (!renderData->accumulated_phase_initialized) {
 				renderData->accumulated_phase = 0.0f;
 				renderData->accumulated_phase_initialized = true;
@@ -487,7 +485,8 @@ valueAtTimeHz(
 				renderData->accumulated_phase = 0.0f;
 				for (int i = 0; i <= curSteps; i++) {
 					PF_FpLong stepValue;
-					err = valueAtTime(in_data, stream_index, i / fps, &stepValue);
+					float adjusted_time = (i / fps) + renderData->layer_start_seconds;
+					err = valueAtTime(in_data, stream_index, adjusted_time, &stepValue);
 					if (err) return err;
 
 					renderData->accumulated_phase += stepValue / fps;
@@ -500,7 +499,6 @@ valueAtTimeHz(
 
 	return err;
 }
-
 
 
 struct OpenCLGPUData
@@ -897,7 +895,6 @@ ProcessAutoShake(
 		s = sin(angleRad);
 		c = cos(angleRad);
 
-
 		if (renderData->has_frequency_keyframes && renderData->accumulated_phase_initialized) {
 			evolutionValue = info->evolution + renderData->accumulated_phase;
 		}
@@ -1069,7 +1066,7 @@ LegacyRender(
 		err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
 
 		if (!err && layer) {
-			err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
+			err = suites.LayerSuite7()->AEGP_GetLayerID(layer, &layer_id);
 		}
 	}
 
@@ -1078,7 +1075,7 @@ LegacyRender(
 	PF_FpLong layer_time_offset = 0;
 	if (layer_id != 0 && layer != NULL) {
 		A_Time in_point;
-		err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
+		err = suites.LayerSuite7()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
 
 		if (!err) {
 			layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
@@ -1190,6 +1187,7 @@ PreRender(
 	PF_PreRenderExtra* extra)
 {
 	PF_Err err = PF_Err_NONE;
+
 	PF_CheckoutResult in_result;
 	PF_RenderRequest req = extra->input->output_request;
 
@@ -1203,58 +1201,94 @@ PreRender(
 		AEFX_CLR_STRUCT(param_copy);
 
 		ERR(PF_CHECKOUT_PARAM(in_data, NORMAL_CHECKBOX_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.normal_mode = param_copy.u.bd.value;
+		if (!err) {
+			renderData->info.normal_mode = param_copy.u.bd.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_MAGNITUDE, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.magnitude = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.magnitude = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_FREQUENCY, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.frequency = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.frequency = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_EVOLUTION, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.evolution = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.evolution = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_SEED, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.seed = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.seed = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_ANGLE, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.angle = param_copy.u.ad.value / 65536.0;
+		if (!err) {
+			renderData->info.angle = param_copy.u.ad.value / 65536.0;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_SLACK, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.slack = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.slack = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, AUTOSHAKE_ZSHAKE, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.zshake = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.zshake = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, X_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.x_tiles = param_copy.u.bd.value;
+		if (!err) {
+			renderData->info.x_tiles = param_copy.u.bd.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, Y_TILES_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.y_tiles = param_copy.u.bd.value;
+		if (!err) {
+			renderData->info.y_tiles = param_copy.u.bd.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, MIRROR_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.mirror = param_copy.u.bd.value;
+		if (!err) {
+			renderData->info.mirror = param_copy.u.bd.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_CHECKBOX_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_mode = param_copy.u.bd.value;
+		if (!err) {
+			renderData->info.compatibility_mode = param_copy.u.bd.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_MAGNITUDE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_magnitude = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.compatibility_magnitude = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_SPEED_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_speed = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.compatibility_speed = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_EVOLUTION_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_evolution = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.compatibility_evolution = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_SEED_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_seed = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.compatibility_seed = param_copy.u.fs_d.value;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_ANGLE_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_angle = param_copy.u.ad.value / 65536.0;
+		if (!err) {
+			renderData->info.compatibility_angle = param_copy.u.ad.value / 65536.0;
+		}
 
 		ERR(PF_CHECKOUT_PARAM(in_data, COMPATIBILITY_SLACK_DISK_ID, in_data->current_time, in_data->time_step, in_data->time_scale, &param_copy));
-		if (!err) renderData->info.compatibility_slack = param_copy.u.fs_d.value;
+		if (!err) {
+			renderData->info.compatibility_slack = param_copy.u.fs_d.value;
+		}
 
 		bool has_frequency_keyframes = HasAnyFrequencyKeyframes(in_data);
 		renderData->has_frequency_keyframes = has_frequency_keyframes;
@@ -1267,21 +1301,24 @@ PreRender(
 
 		if (suites.PFInterfaceSuite1() && in_data->effect_ref) {
 			AEGP_LayerH layer = NULL;
-
 			err = suites.PFInterfaceSuite1()->AEGP_GetEffectLayer(in_data->effect_ref, &layer);
 
 			if (!err && layer) {
-				err = suites.LayerSuite9()->AEGP_GetLayerID(layer, &layer_id);
+				err = suites.LayerSuite7()->AEGP_GetLayerID(layer, &layer_id);
 
 				A_Time in_point;
-				err = suites.LayerSuite9()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
-
+				err = suites.LayerSuite7()->AEGP_GetLayerInPoint(layer, AEGP_LTimeMode_LayerTime, &in_point);
 				if (!err) {
 					layer_time_offset = (PF_FpLong)in_point.value / (PF_FpLong)in_point.scale;
 					renderData->layer_start_seconds = layer_time_offset;
 				}
 
-				err = suites.LayerSuite9()->AEGP_GetLayerStretch(layer, &stretch_factor);
+				err = suites.LayerSuite7()->AEGP_GetLayerStretch(layer, &stretch_factor);
+				if (!err) {
+					if (stretch_factor.den == 0) {
+						stretch_factor.den = 1;
+					}
+				}
 			}
 		}
 
@@ -1318,14 +1355,14 @@ PreRender(
 		extra->output->pre_render_data = renderData;
 		extra->output->delete_pre_render_data_func = DisposePreRenderData;
 
-		ERR(extra->cb->checkout_layer(in_data->effect_ref,
+		err = extra->cb->checkout_layer(in_data->effect_ref,
 			AUTOSHAKE_INPUT,
 			AUTOSHAKE_INPUT,
 			&req,
 			in_data->current_time,
 			in_data->time_step,
 			in_data->time_scale,
-			&in_result));
+			&in_result);
 
 		if (!err) {
 			struct {
@@ -1337,12 +1374,12 @@ PreRender(
 			} detection_data;
 
 			detection_data.has_frequency_keyframes = has_frequency_keyframes ? 1 : 0;
-			detection_data.time_offset = 0; 
+			detection_data.time_offset = 0;
 			detection_data.layer_id = layer_id;
 			detection_data.stretch_factor = stretch_factor;
 			detection_data.info = renderData->info;
 
-			ERR(extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data));
+			err = extra->cb->GuidMixInPtr(in_data->effect_ref, sizeof(detection_data), &detection_data);
 
 			extra->output->max_result_rect = in_result.max_result_rect;
 			extra->output->result_rect = in_result.result_rect;
@@ -1355,7 +1392,6 @@ PreRender(
 
 	return err;
 }
-
 
 static size_t
 RoundUp(
@@ -1402,65 +1438,155 @@ SmartRenderCPU(
 	PF_FpLong original_compatibility_slack = renderData->info.compatibility_slack;
 
 	if (renderData->info.normal_mode) {
-		renderData->info.magnitude *= downsample_factor_x;      
-		renderData->info.slack *= downsample_factor_y / downsample_factor_x;         
+		renderData->info.magnitude *= downsample_factor_x;
+		renderData->info.slack *= downsample_factor_y / downsample_factor_x;
 	}
 
 	if (renderData->info.compatibility_mode) {
-		renderData->info.compatibility_magnitude *= downsample_factor_x;      
-		renderData->info.compatibility_slack *= downsample_factor_y / downsample_factor_x;         
+		renderData->info.compatibility_magnitude *= downsample_factor_x;
+		renderData->info.compatibility_slack *= downsample_factor_y / downsample_factor_x;
 	}
 
 	if (!err) {
 		switch (pixel_format) {
 		case PF_PixelFormat_ARGB128: {
-			AEFX_SuiteScoper<PF_iterateFloatSuite2> iterateFloatSuite =
-				AEFX_SuiteScoper<PF_iterateFloatSuite2>(in_data,
+			if (in_data->version.major <= 16) {
+				PF_iterateFloatSuite1* iterateFloatSuite = NULL;
+				err = AEFX_AcquireSuite(in_data,
+					out_data,
 					kPFIterateFloatSuite,
-					kPFIterateFloatSuiteVersion2,
-					out_data);
-			ERR(iterateFloatSuite->iterate(in_data,
-				0,
-				output_worldP->height,
-				input_worldP,
-				NULL,
-				(void*)renderData,
-				ProcessAutoShakeFloat,
-				output_worldP));
+					kPFIterateFloatSuiteVersion1,
+					"Unable to acquire float iteration suite",
+					(void**)&iterateFloatSuite);
+
+				if (!err && iterateFloatSuite) {
+					err = iterateFloatSuite->iterate(in_data,
+						0,
+						output_worldP->height,
+						input_worldP,
+						NULL,
+						(void*)renderData,
+						ProcessAutoShakeFloat,
+						output_worldP);
+
+					AEFX_ReleaseSuite(in_data,
+						out_data,
+						kPFIterateFloatSuite,
+						kPFIterateFloatSuiteVersion1,
+						NULL);
+				}
+			}
+			else {
+				AEFX_SuiteScoper<PF_iterateFloatSuite2> iterateFloatSuite =
+					AEFX_SuiteScoper<PF_iterateFloatSuite2>(in_data,
+						kPFIterateFloatSuite,
+						kPFIterateFloatSuiteVersion2,
+						out_data);
+
+				ERR(iterateFloatSuite->iterate(in_data,
+					0,
+					output_worldP->height,
+					input_worldP,
+					NULL,
+					(void*)renderData,
+					ProcessAutoShakeFloat,
+					output_worldP));
+			}
 			break;
 		}
+
 		case PF_PixelFormat_ARGB64: {
-			AEFX_SuiteScoper<PF_iterate16Suite2> iterate16Suite =
-				AEFX_SuiteScoper<PF_iterate16Suite2>(in_data,
+			if (in_data->version.major <= 16) {
+				PF_iterate16Suite1* iterate16Suite = NULL;
+				err = AEFX_AcquireSuite(in_data,
+					out_data,
 					kPFIterate16Suite,
-					kPFIterate16SuiteVersion2,
-					out_data);
-			ERR(iterate16Suite->iterate(in_data,
-				0,
-				output_worldP->height,
-				input_worldP,
-				NULL,
-				(void*)renderData,
-				ProcessAutoShake16,
-				output_worldP));
+					kPFIterate16SuiteVersion1,
+					"Unable to acquire 16-bit iteration suite",
+					(void**)&iterate16Suite);
+
+				if (!err && iterate16Suite) {
+					err = iterate16Suite->iterate(in_data,
+						0,
+						output_worldP->height,
+						input_worldP,
+						NULL,
+						(void*)renderData,
+						ProcessAutoShake16,
+						output_worldP);
+
+					AEFX_ReleaseSuite(in_data,
+						out_data,
+						kPFIterate16Suite,
+						kPFIterate16SuiteVersion1,
+						NULL);
+				}
+			}
+			else {
+				AEFX_SuiteScoper<PF_iterate16Suite2> iterate16Suite =
+					AEFX_SuiteScoper<PF_iterate16Suite2>(in_data,
+						kPFIterate16Suite,
+						kPFIterate16SuiteVersion2,
+						out_data);
+
+				ERR(iterate16Suite->iterate(in_data,
+					0,
+					output_worldP->height,
+					input_worldP,
+					NULL,
+					(void*)renderData,
+					ProcessAutoShake16,
+					output_worldP));
+			}
 			break;
 		}
+
 		case PF_PixelFormat_ARGB32: {
-			AEFX_SuiteScoper<PF_Iterate8Suite2> iterate8Suite =
-				AEFX_SuiteScoper<PF_Iterate8Suite2>(in_data,
+			if (in_data->version.major <= 16) {
+				PF_Iterate8Suite1* iterate8Suite = NULL;
+				err = AEFX_AcquireSuite(in_data,
+					out_data,
 					kPFIterate8Suite,
-					kPFIterate8SuiteVersion2,
-					out_data);
-			ERR(iterate8Suite->iterate(in_data,
-				0,
-				output_worldP->height,
-				input_worldP,
-				NULL,
-				(void*)renderData,
-				ProcessAutoShake8,
-				output_worldP));
+					kPFIterate8SuiteVersion1,
+					"Unable to acquire 8-bit iteration suite",
+					(void**)&iterate8Suite);
+
+				if (!err && iterate8Suite) {
+					err = iterate8Suite->iterate(in_data,
+						0,
+						output_worldP->height,
+						input_worldP,
+						NULL,
+						(void*)renderData,
+						ProcessAutoShake8,
+						output_worldP);
+
+					AEFX_ReleaseSuite(in_data,
+						out_data,
+						kPFIterate8Suite,
+						kPFIterate8SuiteVersion1,
+						NULL);
+				}
+			}
+			else {
+				AEFX_SuiteScoper<PF_Iterate8Suite2> iterate8Suite =
+					AEFX_SuiteScoper<PF_Iterate8Suite2>(in_data,
+						kPFIterate8Suite,
+						kPFIterate8SuiteVersion2,
+						out_data);
+
+				ERR(iterate8Suite->iterate(in_data,
+					0,
+					output_worldP->height,
+					input_worldP,
+					NULL,
+					(void*)renderData,
+					ProcessAutoShake8,
+					output_worldP));
+			}
 			break;
 		}
+
 		default:
 			err = PF_Err_BAD_CALLBACK_PARAM;
 			break;
@@ -1868,15 +1994,28 @@ SmartRender(
 
 	ThreadRenderData* renderData = reinterpret_cast<ThreadRenderData*>(extraP->input->pre_render_data);
 
-	if (renderData) {
+	if (!renderData) {
+		return PF_Err_INTERNAL_STRUCT_DAMAGED;
+	}
+
+	try {
 		ERR((extraP->cb->checkout_layer_pixels(in_data->effect_ref, AUTOSHAKE_INPUT, &input_worldP)));
+		if (err) {
+			return err;
+		}
+
 		ERR(extraP->cb->checkout_output(in_data->effect_ref, &output_worldP));
+		if (err) {
+			extraP->cb->checkin_layer_pixels(in_data->effect_ref, AUTOSHAKE_INPUT);
+			return err;
+		}
 
 		AEFX_SuiteScoper<PF_WorldSuite2> world_suite = AEFX_SuiteScoper<PF_WorldSuite2>(in_data,
 			kPFWorldSuite,
 			kPFWorldSuiteVersion2,
 			out_data);
-		PF_PixelFormat	pixel_format = PF_PixelFormat_INVALID;
+
+		PF_PixelFormat pixel_format = PF_PixelFormat_INVALID;
 		ERR(world_suite->PF_GetPixelFormat(input_worldP, &pixel_format));
 
 		if (isGPU) {
@@ -1885,11 +2024,16 @@ SmartRender(
 		else {
 			ERR(SmartRenderCPU(in_data, out_data, pixel_format, input_worldP, output_worldP, extraP, renderData));
 		}
+
 		ERR2(extraP->cb->checkin_layer_pixels(in_data->effect_ref, AUTOSHAKE_INPUT));
 	}
-	else {
-		return PF_Err_INTERNAL_STRUCT_DAMAGED;
+	catch (PF_Err& thrown_err) {
+		err = thrown_err;
 	}
+	catch (...) {
+		err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+	}
+
 	return err;
 }
 
@@ -1969,10 +2113,9 @@ EffectMain(
 	catch (PF_Err& thrown_err) {
 		err = thrown_err;
 	}
+	catch (...) {
+		err = PF_Err_INTERNAL_STRUCT_DAMAGED;
+	}
 
 	return err;
 }
-
-
-
-

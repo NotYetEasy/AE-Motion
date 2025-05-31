@@ -15,6 +15,9 @@
     <Filter Include="Supporting code">
       <UniqueIdentifier>{03fd496f-b43c-4c3e-9257-8b5ad0471a56}</UniqueIdentifier>
     </Filter>
+    <Filter Include="AEFX">
+      <UniqueIdentifier>{e40c72ae-0db1-4cea-8dbc-5008a09ab0e8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\Util\Smart_Utils.h">
@@ -101,6 +104,9 @@
     <ClInclude Include="..\SimplexNoise.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\Util\AEFX_SuiteHelper.h">
+      <Filter>AEFX</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\Util\Smart_Utils.cpp">
@@ -112,6 +118,9 @@
     </ClCompile>
     <ClCompile Include="..\AEGP_SuiteHandler_MF.cpp" />
     <ClCompile Include="..\SimplexNoise.cpp" />
+    <ClCompile Include="..\..\..\Util\AEFX_SuiteHelper.c">
+      <Filter>AEFX</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\AutoShakeKernel.cu" />
