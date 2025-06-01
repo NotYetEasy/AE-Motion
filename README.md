@@ -24,7 +24,7 @@ This project is currently offically **Windows** only unfortunately, this reposit
 1. Navigate to **C:\Program Files\Adobe\Common\Plug-ins** (Note, even if you installed After Effects on a **seperate drive** this directory will remain in your **C:\ Drive**)
 2. Go inside the folder your After Effects version is of. **For example my version says 7.0.** So the directory would be: **C:\Program Files\Adobe\Common\Plug-ins\7.0 for me.** Your directory might depend. To find it if your confused just navigate inside the **latest updated folder.** You can press on the **The Date Modified Button** at the top of the **folder directory (Note: It will have a small arrow pointing down to sort from largest to smallest)**. From there go inside the **newest folder.** However you might also have **a single folder present,** in which case go inside it.
 3. Navigate inside the **MediaCore** folder.
-4. **Drag over** or more precisely **Insert** the Folder you downloaded from **Releases**. You can also **copy or cut** it into the directory.
+4. **Drag over** or more precisely **Insert** the Folder you downloaded from **Releases**. You can also **copy or cut** it into the directory. I have included a **Zipped File** (It's called **ZipFilePlugin.zip**) including all the plugins **(.aex files)**, you can extract that into a folder and name the folder **anything** you like. Or you can **individually** download the .aex files and **move/copy/cut** them into a folder and name that what you like.
 5. Open After Effects, go to the **Effects and Presets Panel** and from there locate **DKT Effects** and use them. You have succesfully finished installation.
 
 >## Contribution:
