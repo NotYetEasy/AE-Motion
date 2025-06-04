@@ -5,7 +5,7 @@
 
 # Ae Motion
 
-<a href="https://discord.gg/wg6k3JCD9s">
+<a href="https://discord.gg/hyt5KmqQEv">
   <img alt="discord-plural" height="56" src="https://cdn.jsdelivr.net/npm/@intergrav/devins-badges@3/assets/cozy-minimal/social/discord-plural_vector.svg">
 </a>
 
@@ -17,7 +17,7 @@
 >### This project is made with the help of AI! We are only newbies and are still learning. Any help AI or Manual will be appreciated. To help send a pull request to the repository. This project is Open-Source and is licensed under the Apache-2.0 License. Don't forget to star the repository!
 >### It is to be noted, this repository of effects were mostly made to be useful for Wis Editing and making Shakes though it is definitely not limited to it and can be useful for AMV Editors or a Professional!
 Our [Discord](https://discord.com/) Server for reference (There is a shield at the top aswell):
-[After Effects Wis](https://discord.gg/wg6k3JCD9s)
+[Engrassia](https://discord.gg/hyt5KmqQEv)
 
 >## Installation:
 This project is currently offically **Windows** only unfortunately, this repository will be unable to assist any MacOS users any further. However with tinkering you might be able to get it to **build and work**. Steps to use the effects in After Effects:
