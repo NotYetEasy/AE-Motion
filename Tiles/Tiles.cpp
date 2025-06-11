@@ -613,7 +613,7 @@ SmartRenderCPU(
             AEFX_SuiteScoper<PF_iterate16Suite1> iterate16Suite =
                 AEFX_SuiteScoper<PF_iterate16Suite1>(in_data,
                     kPFIterate16Suite,
-                    kPFIterate16SuiteVersion2,
+                    kPFIterate16SuiteVersion1,
                     out_data);
             iterate16Suite->iterate(in_data,
                 0,
@@ -630,7 +630,7 @@ SmartRenderCPU(
             AEFX_SuiteScoper<PF_Iterate8Suite1> iterate8Suite =
                 AEFX_SuiteScoper<PF_Iterate8Suite1>(in_data,
                     kPFIterate8Suite,
-                    kPFIterate8SuiteVersion2,
+                    kPFIterate8SuiteVersion1,
                     out_data);
 
             iterate8Suite->iterate(in_data,
