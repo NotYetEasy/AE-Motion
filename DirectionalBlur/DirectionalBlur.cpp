@@ -133,7 +133,7 @@ PF_Err NSError2PFErr(NSError* inError)
 {
     if (inError)
     {
-        return PF_Err_INTERNAL_STRUCT_DAMAGED;          
+        return PF_Err_INTERNAL_STRUCT_DAMAGED;
     }
     return PF_Err_NONE;
 }
@@ -449,7 +449,7 @@ static inline void SampleBilinear(
 
         if (stride <= 0) {
             outP->red = outP->green = outP->blue = 0;
-            outP->alpha = 32768;      
+            outP->alpha = 32768;
             return;
         }
 
@@ -551,7 +551,7 @@ static PF_Err DirectionalBlurGeneric(
 
     if (!refcon || !inP || !outP) {
         if (inP && outP) {
-            *outP = *inP;          
+            *outP = *inP;
         }
         return PF_Err_BAD_CALLBACK_PARAM;
     }
@@ -820,20 +820,23 @@ PreRender(
         float height = static_cast<float>(in_dataP->height);
         float adjusted_velocity_x = velocity_x * (width / height);
 
-        float expansion_x = fabs(adjusted_velocity_x) * 100.0f;
-        float expansion_y = fabs(velocity_y) * 100.0f;
+        float expansion_x = fabs(adjusted_velocity_x);
+        float expansion_y = fabs(velocity_y);
 
-        PF_Rect expanded_rect = in_result.result_rect;
-        expanded_rect.left -= static_cast<A_long>(expansion_x);
-        expanded_rect.top -= static_cast<A_long>(expansion_y);
-        expanded_rect.right += static_cast<A_long>(expansion_x);
-        expanded_rect.bottom += static_cast<A_long>(expansion_y);
+        extraP->output->result_rect = in_result.result_rect;
+        extraP->output->result_rect.left -= static_cast<A_long>(expansion_x);
+        extraP->output->result_rect.top -= static_cast<A_long>(expansion_y);
+        extraP->output->result_rect.right += static_cast<A_long>(expansion_x);
+        extraP->output->result_rect.bottom += static_cast<A_long>(expansion_y);
+
+        extraP->output->max_result_rect = in_result.max_result_rect;
+        extraP->output->max_result_rect.left -= static_cast<A_long>(expansion_x);
+        extraP->output->max_result_rect.top -= static_cast<A_long>(expansion_y);
+        extraP->output->max_result_rect.right += static_cast<A_long>(expansion_x);
+        extraP->output->max_result_rect.bottom += static_cast<A_long>(expansion_y);
 
         extraP->output->pre_render_data = infoP;
         extraP->output->delete_pre_render_data_func = DisposePreRenderData;
-
-        extraP->output->max_result_rect = expanded_rect;
-        extraP->output->result_rect = in_result.result_rect;
 
         extraP->output->flags |= PF_RenderOutputFlag_RETURNS_EXTRA_PIXELS;
 
@@ -845,6 +848,8 @@ PreRender(
     }
     return err;
 }
+
+
 
 static PF_Err
 SmartRenderCPU(
@@ -1282,12 +1287,12 @@ PF_Err PluginDataEntryFunction2(
     result = PF_REGISTER_EFFECT_EXT2(
         inPtr,
         inPluginDataCallBackPtr,
-        "DKT Directional Blur",  
-        "DKT Directional Blur",   
-        "DKT Effects",  
-        AE_RESERVED_INFO,   
-        "EffectMain",	  
-        "https://www.adobe.com");	  
+        "DKT Directional Blur",
+        "DKT Directional Blur",
+        "DKT Effects",
+        AE_RESERVED_INFO,
+        "EffectMain",
+        "https://www.adobe.com");
 
     return result;
 }
