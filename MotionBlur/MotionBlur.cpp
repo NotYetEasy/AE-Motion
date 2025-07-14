@@ -1752,17 +1752,17 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                     next_evolution_val = next_evolution + next_frequency * next_time_secs;
                 }
 
-                prev_dx = SimplexNoise::noise(prev_evolution_val, prev_seed * 49235.319798);
-                prev_dy = SimplexNoise::noise(prev_evolution_val + 7468.329, prev_seed * 19337.940385);
-                prev_dz = SimplexNoise::noise(prev_evolution_val + 14192.277, prev_seed * 71401.168533);
+                prev_dx = SimplexNoise::simplex_noise(prev_evolution_val, prev_seed * 49235.319798, 2);
+                prev_dy = SimplexNoise::simplex_noise(prev_evolution_val + 7468.329, prev_seed * 19337.940385, 2);
+                prev_dz = SimplexNoise::simplex_noise(prev_evolution_val + 14192.277, prev_seed * 71401.168533, 2);
 
-                curr_dx = SimplexNoise::noise(current_evolution_val, seed * 49235.319798);
-                curr_dy = SimplexNoise::noise(current_evolution_val + 7468.329, seed * 19337.940385);
-                curr_dz = SimplexNoise::noise(current_evolution_val + 14192.277, seed * 71401.168533);
+                curr_dx = SimplexNoise::simplex_noise(current_evolution_val, seed * 49235.319798, 2);
+                curr_dy = SimplexNoise::simplex_noise(current_evolution_val + 7468.329, seed * 19337.940385, 2);
+                curr_dz = SimplexNoise::simplex_noise(current_evolution_val + 14192.277, seed * 71401.168533, 2);
 
-                next_dx = SimplexNoise::noise(next_evolution_val, next_seed * 49235.319798);
-                next_dy = SimplexNoise::noise(next_evolution_val + 7468.329, next_seed * 19337.940385);
-                next_dz = SimplexNoise::noise(next_evolution_val + 14192.277, next_seed * 71401.168533);
+                next_dx = SimplexNoise::simplex_noise(next_evolution_val, next_seed * 49235.319798, 2);
+                next_dy = SimplexNoise::simplex_noise(next_evolution_val + 7468.329, next_seed * 19337.940385, 2);
+                next_dz = SimplexNoise::simplex_noise(next_evolution_val + 14192.277, next_seed * 71401.168533, 2);
 
                 prev_dx *= prev_magnitude;
                 prev_dy *= prev_magnitude * prev_slack;
@@ -1781,16 +1781,16 @@ static bool DetectMotionFromOtherEffects(PF_InData* in_data, double* motion_x, d
                 double curr_evolution_compat = compat_evolution + (current_time_secs * compat_speed) - compat_speed;
                 double next_evolution_compat = next_compat_evolution + (next_time_secs * next_compat_speed) - next_compat_speed;
 
-                prev_dx = SimplexNoise::noise(prev_compat_seed * 54623.245, 0, prev_evolution_compat + prev_compat_seed * 49235.319798);
-                prev_dy = SimplexNoise::noise(0, prev_compat_seed * 8723.5647, prev_evolution_compat + 7468.329 + prev_compat_seed * 19337.940385);
+                prev_dx = SimplexNoise::simplex_noise(prev_compat_seed * 54623.245, 0, prev_evolution_compat + prev_compat_seed * 49235.319798, 3);
+                prev_dy = SimplexNoise::simplex_noise(0, prev_compat_seed * 8723.5647, prev_evolution_compat + 7468.329 + prev_compat_seed * 19337.940385, 3);
                 prev_dz = 0;
 
-                curr_dx = SimplexNoise::noise(compat_seed * 54623.245, 0, curr_evolution_compat + compat_seed * 49235.319798);
-                curr_dy = SimplexNoise::noise(0, compat_seed * 8723.5647, curr_evolution_compat + 7468.329 + compat_seed * 19337.940385);
+                curr_dx = SimplexNoise::simplex_noise(compat_seed * 54623.245, 0, curr_evolution_compat + compat_seed * 49235.319798, 3);
+                curr_dy = SimplexNoise::simplex_noise(0, compat_seed * 8723.5647, curr_evolution_compat + 7468.329 + compat_seed * 19337.940385, 3);
                 curr_dz = 0;
 
-                next_dx = SimplexNoise::noise(next_compat_seed * 54623.245, 0, next_evolution_compat + next_compat_seed * 49235.319798);
-                next_dy = SimplexNoise::noise(0, next_compat_seed * 8723.5647, next_evolution_compat + 7468.329 + next_compat_seed * 19337.940385);
+                next_dx = SimplexNoise::simplex_noise(next_compat_seed * 54623.245, 0, next_evolution_compat + next_compat_seed * 49235.319798, 3);
+                next_dy = SimplexNoise::simplex_noise(0, next_compat_seed * 8723.5647, next_evolution_compat + 7468.329 + next_compat_seed * 19337.940385, 3);
                 next_dz = 0;
 
                 prev_dx *= prev_compat_magnitude;
@@ -3409,41 +3409,17 @@ if (strstr(match_name, "DKT Pulse Size")) {
                 suites.StreamSuite5()->AEGP_DisposeStream(streamH);
             }
 
-            double prev_noise_dx = SimplexNoise::noise(
-                centerX * prev_scatter / 50.0 + prev_seed * 54623.245,
-                -centerY * prev_scatter / 500.0,
-                prev_evolution + prev_seed * 49235.319798
-            );
+            double prev_noise_dx = SimplexNoise::simplex_noise(centerX * prev_scatter / 50.0 + prev_seed * 54623.245, centerY * prev_scatter / 500.0, prev_evolution + prev_seed * 49235.319798, 3);
 
-            double prev_noise_dy = SimplexNoise::noise(
-                centerX * prev_scatter / 50.0,
-                centerY * prev_scatter / 500.0 + prev_seed * 8723.5647,
-                prev_evolution + 7468.329 + prev_seed * 19337.940385
-            );
+            double prev_noise_dy = SimplexNoise::simplex_noise(centerX * prev_scatter / 50.0, centerY * prev_scatter / 500.0 + prev_seed * 8723.5647, prev_evolution + 7468.329 + prev_seed * 19337.940385, 3);
 
-            double curr_noise_dx = SimplexNoise::noise(
-                centerX * scatter / 50.0 + seed * 54623.245,
-                -centerY * scatter / 500.0,
-                evolution + seed * 49235.319798
-            );
+            double curr_noise_dx = SimplexNoise::simplex_noise(centerX * scatter / 50.0 + seed * 54623.245, centerY * scatter / 500.0, evolution + seed * 49235.319798, 3);
 
-            double curr_noise_dy = SimplexNoise::noise(
-                centerX * scatter / 50.0,
-                centerY * scatter / 500.0 + seed * 8723.5647,
-                evolution + 7468.329 + seed * 19337.940385
-            );
+            double curr_noise_dy = SimplexNoise::simplex_noise(centerX * scatter / 50.0, centerY * scatter / 500.0 + seed * 8723.5647, evolution + 7468.329 + seed * 19337.940385, 3);
 
-            double next_noise_dx = SimplexNoise::noise(
-                centerX * next_scatter / 50.0 + next_seed * 54623.245,
-                -centerY * next_scatter / 500.0,
-                next_evolution + next_seed * 49235.319798
-            );
+            double next_noise_dx = SimplexNoise::simplex_noise(centerX * next_scatter / 50.0 + next_seed * 54623.245, centerY * next_scatter / 500.0, next_evolution + next_seed * 49235.319798, 3);
 
-            double next_noise_dy = SimplexNoise::noise(
-                centerX * next_scatter / 50.0,
-                centerY * next_scatter / 500.0 + next_seed * 8723.5647,
-                next_evolution + 7468.329 + next_seed * 19337.940385
-            );
+            double next_noise_dy = SimplexNoise::simplex_noise(centerX * next_scatter / 50.0, centerY * next_scatter / 500.0 + next_seed * 8723.5647, next_evolution + 7468.329 + next_seed * 19337.940385, 3);
 
             double prev_dx = -prev_magnitude * prev_noise_dx;
             double prev_dy = prev_magnitude * prev_noise_dy;
