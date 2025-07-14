@@ -129,6 +129,7 @@ typedef struct {
     TransformMatrix layerToScreen;             
 } CoordinateTransforms;
 
+
 typedef struct
 {
     float positionX;
@@ -147,8 +148,9 @@ typedef struct
     A_long height;
     void* inputP;
     A_long rowbytes;
+    int expand_x;
+    int expand_y;
     CoordinateTransforms transforms;
 } FractalWarpParams;
-
 
 #endif  

@@ -18,64 +18,96 @@
 #define sqrtf sqrt
 #endif
 
-__device__ float mixf(float a, float b, float t) {
-    return a * (1.0f - t) + b * t;
+GF_DEVICE_FUNCTION float Mix(float a, float b, float t) {
+    double a_d = (double)a;
+    double b_d = (double)b;
+    double t_d = (double)t;
+    double result_d = a_d * (1.0 - t_d) + b_d * t_d;
+    return (float)result_d;
 }
 
-__device__ float fractf(float x) {
-    return x - floorf(x);
+GF_DEVICE_FUNCTION float Fract(float x) {
+    double x_d = (double)x;
+    double result_d = x_d - floor(x_d);
+    return (float)result_d;
 }
 
-__device__ float random_hash(float x, float y) {
-    return fractf(sinf(x * 12.9898f + y * 78.233f) * 43758.5453123f);
+GF_DEVICE_FUNCTION float Random(float x, float y) {
+    float sin_input = x * 12.9898f + y * 78.233f;
+
+    double sin_input_d = (double)sin_input;
+    double sin_result_d = sin(sin_input_d);
+    double multiplied_d = sin_result_d * 43758.5453123;
+
+    double fract_d = multiplied_d - floor(multiplied_d);
+    return (float)fract_d;
 }
 
-__device__ float noise(float x, float y) {
-    float i = floorf(x);
-    float j = floorf(y);
-    float f = x - i;
-    float g = y - j;
+GF_DEVICE_FUNCTION float Noise(float x, float y) {
+    double x_d = (double)x;
+    double y_d = (double)y;
 
-    float a = random_hash(i, j);
-    float b = random_hash(i + 1.0f, j);
-    float c = random_hash(i, j + 1.0f);
-    float d = random_hash(i + 1.0f, j + 1.0f);
+    double i = floor(x_d);
+    double j = floor(y_d);
+    double f = x_d - i;
+    double g = y_d - j;
 
-    float u = f * f * (3.0f - 2.0f * f);
-    float v = g * g * (3.0f - 2.0f * g);
+    float a = Random((float)i, (float)j);
+    float b = Random((float)(i + 1.0), (float)j);
+    float c = Random((float)i, (float)(j + 1.0));
+    float d = Random((float)(i + 1.0), (float)(j + 1.0));
 
-    return mixf(mixf(a, b, u), mixf(c, d, u), v);
+    double a_d = (double)a;
+    double b_d = (double)b;
+    double c_d = (double)c;
+    double d_d = (double)d;
+
+    double u = f * f * (3.0 - 2.0 * f);
+    double v = g * g * (3.0 - 2.0 * g);
+
+    double mix1 = a_d * (1.0 - u) + b_d * u;
+    double mix2 = c_d * (1.0 - u) + d_d * u;
+    double result_d = mix1 * (1.0 - v) + mix2 * v;
+
+    return (float)result_d;
 }
 
-__device__ float fbm(float x, float y, float px, float py, int octaveCount, float intensity) {
-    float value = 0.0f;
-    float amplitude = 0.5f;
+GF_DEVICE_FUNCTION float FBM(float x, float y, float px, float py, int octaveCount, float intensity) {
+    double x_d = (double)x;
+    double y_d = (double)y;
+    double px_d = (double)px;
+    double py_d = (double)py;
+    double intensity_d = (double)intensity;
+
+    double value = 0.0;
+    double amplitude = 0.5;
 
     for (int i = 0; i < octaveCount; i++) {
-        value += amplitude * noise(x, y);
+        float noise_val = Noise((float)x_d, (float)y_d);
+        double noise_val_d = (double)noise_val;
 
-        x = x * 2.0f + px;
-        y = y * 2.0f + py;
-
-        amplitude *= intensity;
+        value += amplitude * noise_val_d;
+        x_d = x_d * 2.0 + px_d;
+        y_d = y_d * 2.0 + py_d;
+        amplitude *= intensity_d;
     }
 
-    return value;
+    return (float)value;
 }
 
-__device__ int min_int(int a, int b) {
+GF_DEVICE_FUNCTION int min_int(int a, int b) {
     return a < b ? a : b;
 }
 
-__device__ int max_int(int a, int b) {
+GF_DEVICE_FUNCTION int max_int(int a, int b) {
     return a > b ? a : b;
 }
 
-__device__ float fminf_custom(float a, float b) {
+GF_DEVICE_FUNCTION float fminf_custom(float a, float b) {
     return a < b ? a : b;
 }
 
-__device__ float fmaxf_custom(float a, float b) {
+GF_DEVICE_FUNCTION float fmaxf_custom(float a, float b) {
     return a > b ? a : b;
 }
 
@@ -131,19 +163,11 @@ GF_KERNEL_FUNCTION(FractalWarpKernel,
         float parallax_x = inParallaxX / 200.0f * -1.0f;
         float parallax_y = inParallaxY / 200.0f * 1.0f;
 
-        const float dx = fbm(
-            ((st_x - 0.5f) * 3.0f * inDetail) + 0.5f,
-            ((st_y - 0.5f) * 3.0f * inDetail) + 0.5f,
-            parallax_x, parallax_y,
-            inOctaves, inLacunarity
-        );
+        float fbm_x_coord = ((st_x - 0.5f) * 3.0f * inDetail) + 0.5f;
+        float fbm_y_coord = ((st_y - 0.5f) * 3.0f * inDetail) + 0.5f;
 
-        const float dy = fbm(
-            ((st_x + 25.3f - 0.5f) * 3.0f * inDetail) + 0.5f,
-            ((st_y + 12.9f - 0.5f) * 3.0f * inDetail) + 0.5f,
-            parallax_x, parallax_y,
-            inOctaves, inLacunarity
-        );
+        float dx = FBM(fbm_x_coord, fbm_y_coord, parallax_x, parallax_y, inOctaves, inLacunarity);
+        float dy = FBM(((st_x + 25.3f - 0.5f) * 3.0f * inDetail) + 0.5f, ((st_y + 12.9f - 0.5f) * 3.0f * inDetail) + 0.5f, parallax_x, parallax_y, inOctaves, inLacunarity);
 
         float sample_x, sample_y;
         if (inScreenSpace) {
@@ -162,7 +186,6 @@ GF_KERNEL_FUNCTION(FractalWarpKernel,
         sample_y = (1.0f - sample_y) * height;
 
         bool outsideBounds = false;
-
         float norm_x = sample_x / width;
         float norm_y = sample_y / height;
 
@@ -252,7 +275,10 @@ GF_KERNEL_FUNCTION(FractalWarpKernel,
 
 #endif
 
-#if __NVCC__
+#ifdef __NVCC__
+#include <stdio.h>
+#include <cuda_runtime.h>
+
 void FractalWarp_CUDA(
     float const* src,
     float* dst,
@@ -274,10 +300,10 @@ void FractalWarp_CUDA(
     int y_tiles,
     int mirror)
 {
-    dim3 blockDim(16, 16, 1);
-    dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
+    dim3 blockSize(16, 16, 1);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y, 1);
 
-    FractalWarpKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst,
+    FractalWarpKernel << <gridSize, blockSize, 0 >> > ((float4 const*)src, (float4*)dst,
         srcPitch, dstPitch, is16f, width, height,
         positionX, positionY, parallaxX, parallaxY,
         magnitude, detail, lacunarity, screenSpace, octaves,

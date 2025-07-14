@@ -45,6 +45,7 @@ extern void FractalWarp_CUDA(
     int mirror);
 
 
+
 static PF_Err
 About(
     PF_InData* in_data,
@@ -118,15 +119,15 @@ ParamsSetup(
     AEFX_CLR_STRUCT(def);
     PF_ADD_POINT(
         "Position",
-        0, 0,      
-        0,      
+        0, 0,
+        0,
         POSITION_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
     PF_ADD_POINT(
         "Parallax",
-        0, 0,      
-        0,      
+        0, 0,
+        0,
         PARALLAX_DISK_ID);
 
     AEFX_CLR_STRUCT(def);
@@ -189,7 +190,7 @@ ParamsSetup(
     AEFX_CLR_STRUCT(def);
     def.param_type = PF_Param_GROUP_START;
     PF_STRCPY(def.name, "Tiles");
-    def.flags = PF_ParamFlag_START_COLLAPSED;      
+    def.flags = PF_ParamFlag_START_COLLAPSED;
     PF_ADD_PARAM(in_data, -1, &def);
 
     AEFX_CLR_STRUCT(def);
@@ -230,7 +231,7 @@ PF_Err NSError2PFErr(NSError* inError)
 {
     if (inError)
     {
-        return PF_Err_INTERNAL_STRUCT_DAMAGED;           
+        return PF_Err_INTERNAL_STRUCT_DAMAGED;
     }
     return PF_Err_NONE;
 }
@@ -440,71 +441,6 @@ GPUDeviceSetdown(
 }
 
 
-inline float Mix(float a, float b, float t) {
-    return a * (1.0f - t) + b * t;
-}
-
-static float
-Fract(float x) {
-    return x - floorf(x);
-}
-
-static float
-Random(float x, float y) {
-    return Fract(sinf(x * 12.9898f + y * 78.233f) * 43758.5453123f);
-}
-
-static float
-Noise(float x, float y) {
-    float i = floorf(x);
-    float j = floorf(y);
-    float f = Fract(x);
-    float g = Fract(y);
-
-    float a = Random(i, j);
-    float b = Random(i + 1.0f, j);
-    float c = Random(i, j + 1.0f);
-    float d = Random(i + 1.0f, j + 1.0f);
-
-    float u = f * f * (3.0f - 2.0f * f);
-    float v = g * g * (3.0f - 2.0f * g);
-
-    return Mix(Mix(a, b, u), Mix(c, d, u), v);
-}
-
-static float
-FBM(float x, float y, float px, float py, int octaveCount, float intensity) {
-    float value = 0.0f;
-    float amplitude = 0.5f;
-
-    for (int i = 0; i < octaveCount; i++) {
-        value += amplitude * Noise(x, y);
-
-        x = x * 2.0f + px;
-        y = y * 2.0f + py;
-
-        amplitude *= intensity;
-    }
-
-    return value;
-}
-
-
-inline float MinFloat(float a, float b) {
-    return (a < b) ? a : b;
-}
-
-inline float MaxFloat(float a, float b) {
-    return (a > b) ? a : b;
-}
-
-inline A_long MinLong(A_long a, A_long b) {
-    return (a < b) ? a : b;
-}
-
-inline A_long MaxLong(A_long a, A_long b) {
-    return (a > b) ? a : b;
-}
 
 template <typename PixelType>
 static PixelType
@@ -662,6 +598,86 @@ SampleBilinear(PixelType* src, PF_FpLong x, PF_FpLong y, A_long width, A_long he
     return result;
 }
 
+inline float Mix(float a, float b, float t) {
+    double a_d = (double)a;
+    double b_d = (double)b;
+    double t_d = (double)t;
+    double result_d = a_d * (1.0 - t_d) + b_d * t_d;
+    return (float)result_d;
+}
+
+static float Fract(float x) {
+    double x_d = (double)x;
+    double result_d = x_d - floor(x_d);
+    return (float)result_d;
+}
+
+static float Random(float x, float y) {
+    float sin_input = x * 12.9898f + y * 78.233f;
+
+    double sin_input_d = (double)sin_input;
+    double sin_result_d = sin(sin_input_d);
+    double multiplied_d = sin_result_d * 43758.5453123;
+
+    double fract_d = multiplied_d - floor(multiplied_d);
+    return (float)fract_d;
+}
+
+static float Noise(float x, float y) {
+    double x_d = (double)x;
+    double y_d = (double)y;
+
+    double i = floor(x_d);
+    double j = floor(y_d);
+    double f = x_d - i;
+    double g = y_d - j;
+
+    float a = Random((float)i, (float)j);
+    float b = Random((float)(i + 1.0), (float)j);
+    float c = Random((float)i, (float)(j + 1.0));
+    float d = Random((float)(i + 1.0), (float)(j + 1.0));
+
+    double a_d = (double)a;
+    double b_d = (double)b;
+    double c_d = (double)c;
+    double d_d = (double)d;
+
+    double u = f * f * (3.0 - 2.0 * f);
+    double v = g * g * (3.0 - 2.0 * g);
+
+    double mix1 = a_d * (1.0 - u) + b_d * u;
+    double mix2 = c_d * (1.0 - u) + d_d * u;
+    double result_d = mix1 * (1.0 - v) + mix2 * v;
+
+    return (float)result_d;
+}
+
+static float FBM(float x, float y, float px, float py, int octaveCount, float intensity) {
+    double x_d = (double)x;
+    double y_d = (double)y;
+    double px_d = (double)px;
+    double py_d = (double)py;
+    double intensity_d = (double)intensity;
+
+    double value = 0.0;
+    double amplitude = 0.5;
+
+    for (int i = 0; i < octaveCount; i++) {
+        float noise_val = Noise((float)x_d, (float)y_d);
+        double noise_val_d = (double)noise_val;
+
+        value += amplitude * noise_val_d;
+        x_d = x_d * 2.0 + px_d;
+        y_d = y_d * 2.0 + py_d;
+        amplitude *= intensity_d;
+    }
+
+    return (float)value;
+}
+
+
+
+
 template <typename PixelType>
 static PF_Err
 FractalWarpFunc(
@@ -703,9 +719,12 @@ FractalWarpFunc(
         float parallax_x = params->parallaxX / 200.0f * -1.0f;
         float parallax_y = params->parallaxY / 200.0f * 1.0f;
 
+        float fbm_x_coord = ((st_x - 0.5f) * 3.0f * params->detail) + 0.5f;
+        float fbm_y_coord = ((st_y - 0.5f) * 3.0f * params->detail) + 0.5f;
+
         const float dx = FBM(
-            ((st_x - 0.5f) * 3.0f * params->detail) + 0.5f,
-            ((st_y - 0.5f) * 3.0f * params->detail) + 0.5f,
+            fbm_x_coord,
+            fbm_y_coord,
             parallax_x, parallax_y,
             params->octaves, params->lacunarity
         );
@@ -862,7 +881,7 @@ PreRender(
         PF_ParamDef cur_param;
 
         ERR(PF_CHECKOUT_PARAM(in_dataP, FRACTALWARP_POSITION, in_dataP->current_time, in_dataP->time_step, in_dataP->time_scale, &cur_param));
-        paramsP->positionX = cur_param.u.td.x_value / 65536.0f;        
+        paramsP->positionX = cur_param.u.td.x_value / 65536.0f;
         paramsP->positionY = cur_param.u.td.y_value / 65536.0f;
 
         ERR(PF_CHECKOUT_PARAM(in_dataP, FRACTALWARP_PARALLAX, in_dataP->current_time, in_dataP->time_step, in_dataP->time_scale, &cur_param));
@@ -941,7 +960,6 @@ SmartRenderCPU(
     cpuParams.x_tiles = paramsP->x_tiles;
     cpuParams.y_tiles = paramsP->y_tiles;
     cpuParams.mirror = paramsP->mirror;
-
     cpuParams.width = input_worldP->width;
     cpuParams.height = input_worldP->height;
     cpuParams.inputP = input_worldP->data;
@@ -953,12 +971,12 @@ SmartRenderCPU(
     case PF_PixelFormat_ARGB128: {
         err = suites.IterateFloatSuite1()->iterate(
             in_data,
-            0,   
-            linesL,   
+            0,
+            linesL,
             input_worldP,
-            NULL,       
-            (void*)&cpuParams,      
-            FractalWarpFunc<PF_PixelFloat>,    
+            NULL,
+            (void*)&cpuParams,
+            FractalWarpFunc<PF_PixelFloat>,
             output_worldP);
         break;
     }
@@ -966,12 +984,12 @@ SmartRenderCPU(
     case PF_PixelFormat_ARGB64: {
         err = suites.Iterate16Suite1()->iterate(
             in_data,
-            0,   
-            linesL,   
+            0,
+            linesL,
             input_worldP,
-            NULL,       
-            (void*)&cpuParams,      
-            FractalWarpFunc<PF_Pixel16>,    
+            NULL,
+            (void*)&cpuParams,
+            FractalWarpFunc<PF_Pixel16>,
             output_worldP);
         break;
     }
@@ -979,12 +997,12 @@ SmartRenderCPU(
     case PF_PixelFormat_ARGB32: {
         err = suites.Iterate8Suite1()->iterate(
             in_data,
-            0,   
-            linesL,   
+            0,
+            linesL,
             input_worldP,
-            NULL,       
-            (void*)&cpuParams,      
-            FractalWarpFunc<PF_Pixel8>,    
+            NULL,
+            (void*)&cpuParams,
+            FractalWarpFunc<PF_Pixel8>,
             output_worldP);
         break;
     }
@@ -1278,12 +1296,12 @@ PF_Err PluginDataEntryFunction2(
     result = PF_REGISTER_EFFECT_EXT2(
         inPtr,
         inPluginDataCallBackPtr,
-        "Fractal Warp",  
-        "DKT FractalWarp",   
-        "DKT Effects",  
-        AE_RESERVED_INFO,   
-        "EffectMain",   
-        "https://www.example.com");   
+        "Fractal Warp",
+        "DKT FractalWarp",
+        "DKT Effects",
+        AE_RESERVED_INFO,
+        "EffectMain",
+        "https://www.example.com");
 
     return result;
 }
