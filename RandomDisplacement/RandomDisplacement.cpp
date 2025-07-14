@@ -8,6 +8,9 @@
 #include "RandomDisplacement.h"
 #include "SimplexNoise.h"
 #include <iostream>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -38,8 +41,8 @@ extern void RandomDisplacement_CUDA(
 	int x_tiles,
 	int y_tiles,
 	int mirror,
-	float downsample_x,      
-	float downsample_y);     
+	float downsample_x,
+	float downsample_y);
 
 
 static PF_Err
@@ -67,6 +70,8 @@ GlobalSetup(
 	PF_LayerDef* output)
 {
 	PF_Err	err = PF_Err_NONE;
+
+	SimplexNoise::initPerm();
 
 	out_data->my_version = PF_VERSION(MAJOR_VERSION,
 		MINOR_VERSION,
@@ -119,7 +124,7 @@ ParamsSetup(
 		0,
 		200,
 		50,
-		PF_Precision_INTEGER,     
+		PF_Precision_INTEGER,
 		0,
 		0,
 		RANDOM_DISPLACEMENT_MAGNITUDE);
@@ -166,7 +171,7 @@ ParamsSetup(
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_START;
 	PF_STRCPY(def.name, "Tiles");
-	def.flags = PF_ParamFlag_START_COLLAPSED;      
+	def.flags = PF_ParamFlag_START_COLLAPSED;
 	PF_ADD_PARAM(in_data, -1, &def);
 
 	AEFX_CLR_STRUCT(def);
@@ -204,7 +209,7 @@ PF_Err NSError2PFErr(NSError* inError)
 {
 	if (inError)
 	{
-		return PF_Err_INTERNAL_STRUCT_DAMAGED;          
+		return PF_Err_INTERNAL_STRUCT_DAMAGED;
 	}
 	return PF_Err_NONE;
 }
@@ -411,6 +416,8 @@ GPUDeviceSetdown(
 	return err;
 }
 
+
+
 static void ComputeDisplacement(
 	double x,
 	double y,
@@ -421,18 +428,9 @@ static void ComputeDisplacement(
 	double* dx,
 	double* dy)
 {
+	double noise_dx = SimplexNoise::simplex_noise(x * scatter / 50.0 + seed * 54623.245, y * scatter / 500.0, evolution + seed * 49235.319798, 3);
 
-	double noise_dx = SimplexNoise::noise(
-		x * scatter / 50.0 + seed * 54623.245,
-		-y * scatter / 500.0,
-		evolution + seed * 49235.319798
-	);
-
-	double noise_dy = SimplexNoise::noise(
-		x * scatter / 50.0,
-		y * scatter / 500.0 + seed * 8723.5647,
-		evolution + 7468.329 + seed * 19337.940385
-	);
+	double noise_dy = SimplexNoise::simplex_noise(x * scatter / 50.0, y * scatter / 500.0 + seed * 8723.5647, evolution + 7468.329 + seed * 19337.940385, 3);
 
 	*dx = -magnitude * noise_dx;
 	*dy = magnitude * noise_dy;
@@ -825,8 +823,8 @@ typedef struct
 	int mXTiles;
 	int mYTiles;
 	int mMirror;
-	float mDownsampleX;  
-	float mDownsampleY;  
+	float mDownsampleX;
+	float mDownsampleY;
 } DisplacementParams;
 
 
@@ -886,8 +884,8 @@ SmartRenderGPU(
 	params.mXTiles = infoP->x_tiles;
 	params.mYTiles = infoP->y_tiles;
 	params.mMirror = infoP->mirror;
-	params.mDownsampleX = downsample_factor_x;       
-	params.mDownsampleY = downsample_factor_y;       
+	params.mDownsampleX = downsample_factor_x;
+	params.mDownsampleY = downsample_factor_y;
 
 	if (!err && extraP->input->what_gpu == PF_GPU_Framework_OPENCL)
 	{
@@ -913,8 +911,8 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(int), &params.mXTiles));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(int), &params.mYTiles));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(int), &params.mMirror));
-		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(float), &params.mDownsampleX));     
-		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(float), &params.mDownsampleY));     
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(float), &params.mDownsampleX));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->displacement_kernel, param_index++, sizeof(float), &params.mDownsampleY));
 
 		size_t threadBlock[2] = { 16, 16 };
 		size_t grid[2] = { RoundUp(params.mWidth, threadBlock[0]), RoundUp(params.mHeight, threadBlock[1]) };
@@ -947,8 +945,8 @@ SmartRenderGPU(
 			params.mXTiles,
 			params.mYTiles,
 			params.mMirror,
-			params.mDownsampleX,      
-			params.mDownsampleY);     
+			params.mDownsampleX,
+			params.mDownsampleY);
 
 		if (cudaPeekAtLastError() != cudaSuccess) {
 			err = PF_Err_INTERNAL_STRUCT_DAMAGED;
@@ -1208,12 +1206,12 @@ PF_Err PluginDataEntryFunction2(
 	result = PF_REGISTER_EFFECT_EXT2(
 		inPtr,
 		inPluginDataCallBackPtr,
-		"Random Displacement",  
-		"DKT Random Displacement",   
-		"DKT Effects",  
-		AE_RESERVED_INFO,   
-		"EffectMain",	  
-		"");	  
+		"Random Displacement",
+		"DKT Random Displacement",
+		"DKT Effects",
+		AE_RESERVED_INFO,
+		"EffectMain",
+		"");
 
 	return result;
 }

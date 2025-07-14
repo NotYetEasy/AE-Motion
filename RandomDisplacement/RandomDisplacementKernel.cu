@@ -43,6 +43,14 @@ GF_DEVICE_FUNCTION int get_p(int idx) {
     return p_array[idx & 0xFF];
 }
 
+GF_DEVICE_FUNCTION int get_perm(int idx) {
+    return p_array[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_permMod12(int idx) {
+    return get_perm(idx) % 12;
+}
+
 GF_DEVICE_FUNCTION void get_grad3(int idx, out float3 grad) {
     idx = idx % 12;
     grad.x = grad3_array[idx][0];
@@ -77,6 +85,14 @@ __constant__ float grad3[12][3] = {
 
 GF_DEVICE_FUNCTION int get_p(int idx) {
     return p[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_perm(int idx) {
+    return p[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_permMod12(int idx) {
+    return get_perm(idx) % 12;
 }
 
 GF_DEVICE_FUNCTION void get_grad3(int idx, float* grad) {
@@ -131,142 +147,216 @@ GF_DEVICE_FUNCTION float dot_product(float* g, float x, float y, float z) {
 }
 #endif
 
-GF_DEVICE_FUNCTION float simplex_noise(float xin, float yin, float zin) {
-    float n0, n1, n2, n3;       
+GF_DEVICE_FUNCTION float simplex_noise(float x, float y, float z = 0.0f, int dimensions = 3) {
+    if (dimensions == 2) {
+        float n0, n1, n2;
 
-    float s = (xin + yin + zin) * F3_CONST;         
-    int i = fastfloor(xin + s);
-    int j = fastfloor(yin + s);
-    int k = fastfloor(zin + s);
+        float s = (x + y) * F2_CONST;
+        int i = fastfloor(x + s);
+        int j = fastfloor(y + s);
 
-    float t = (i + j + k) * G3_CONST;
-    float X0 = i - t;         
-    float Y0 = j - t;
-    float Z0 = k - t;
-    float x0 = xin - X0;        
-    float y0 = yin - Y0;
-    float z0 = zin - Z0;
+        float t = (i + j) * G2_CONST;
+        float X0 = i - t;
+        float Y0 = j - t;
+        float x0 = x - X0;
+        float y0 = y - Y0;
 
-    int i1, j1, k1;          
-    int i2, j2, k2;          
-
-    if (x0 >= y0) {
-        if (y0 >= z0) {     
-            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+        int i1, j1;
+        if (x0 > y0) {
+            i1 = 1;
+            j1 = 0;
         }
-        else if (x0 >= z0) {     
-            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+        else {
+            i1 = 0;
+            j1 = 1;
         }
-        else {     
-            i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
-        }
-    }
-    else {  
-        if (y0 < z0) {     
-            i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
-        }
-        else if (x0 < z0) {     
-            i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
-        }
-        else {     
-            i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
-        }
-    }
 
-    float x1 = x0 - i1 + G3_CONST;        
-    float y1 = y0 - j1 + G3_CONST;
-    float z1 = z0 - k1 + G3_CONST;
-    float x2 = x0 - i2 + 2.0f * G3_CONST;        
-    float y2 = y0 - j2 + 2.0f * G3_CONST;
-    float z2 = z0 - k2 + 2.0f * G3_CONST;
-    float x3 = x0 - 1.0f + 3.0f * G3_CONST;        
-    float y3 = y0 - 1.0f + 3.0f * G3_CONST;
-    float z3 = z0 - 1.0f + 3.0f * G3_CONST;
+        float x1 = x0 - i1 + G2_CONST;
+        float y1 = y0 - j1 + G2_CONST;
+        float x2 = x0 - 1.0f + 2.0f * G2_CONST;
+        float y2 = y0 - 1.0f + 2.0f * G2_CONST;
 
-    int ii = i & 255;
-    int jj = j & 255;
-    int kk = k & 255;
+        int ii = i & 255;
+        int jj = j & 255;
+        int gi0 = get_permMod12(ii + get_perm(jj));
+        int gi1 = get_permMod12(ii + i1 + get_perm(jj + j1));
+        int gi2 = get_permMod12(ii + 1 + get_perm(jj + 1));
 
-    int gi0 = get_p(ii + get_p(jj + get_p(kk))) % 12;
-    int gi1 = get_p(ii + i1 + get_p(jj + j1 + get_p(kk + k1))) % 12;
-    int gi2 = get_p(ii + i2 + get_p(jj + j2 + get_p(kk + k2))) % 12;
-    int gi3 = get_p(ii + 1 + get_p(jj + 1 + get_p(kk + 1))) % 12;
+        float t0 = 0.5f - x0 * x0 - y0 * y0;
+        if (t0 < 0) {
+            n0 = 0.0f;
+        }
+        else {
+            t0 *= t0;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g0;
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, 0);
+#else
+            float g0[3];
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, 0);
+#endif
+        }
 
-    float t0 = 0.5f - x0 * x0 - y0 * y0 - z0 * z0;
-    if (t0 < 0) {
-        n0 = 0.0f;
+        float t1 = 0.5f - x1 * x1 - y1 * y1;
+        if (t1 < 0) {
+            n1 = 0.0f;
+        }
+        else {
+            t1 *= t1;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g1;
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, 0);
+#else
+            float g1[3];
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, 0);
+#endif
+        }
+
+        float t2 = 0.5f - x2 * x2 - y2 * y2;
+        if (t2 < 0) {
+            n2 = 0.0f;
+        }
+        else {
+            t2 *= t2;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g2;
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, 0);
+#else
+            float g2[3];
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, 0);
+#endif
+        }
+
+        return 70.0f * (n0 + n1 + n2);
     }
     else {
-        t0 *= t0;
+        float n0, n1, n2, n3;
 
+        float s = (x + y + z) * F3_CONST;
+        int i = fastfloor(x + s);
+        int j = fastfloor(y + s);
+        int k = fastfloor(z + s);
+
+        float t = (i + j + k) * G3_CONST;
+        float X0 = i - t;
+        float Y0 = j - t;
+        float Z0 = k - t;
+        float x0 = x - X0;
+        float y0 = y - Y0;
+        float z0 = z - Z0;
+
+        int i1, j1, k1;
+        int i2, j2, k2;
+        if (x0 >= y0) {
+            if (y0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+            }
+            else if (x0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+            }
+            else {
+                i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
+            }
+        }
+        else {
+            if (y0 < z0) {
+                i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
+            }
+            else if (x0 < z0) {
+                i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
+            }
+            else {
+                i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+            }
+        }
+
+        float x1 = x0 - i1 + G3_CONST;
+        float y1 = y0 - j1 + G3_CONST;
+        float z1 = z0 - k1 + G3_CONST;
+        float x2 = x0 - i2 + 2.0f * G3_CONST;
+        float y2 = y0 - j2 + 2.0f * G3_CONST;
+        float z2 = z0 - k2 + 2.0f * G3_CONST;
+        float x3 = x0 - 1.0f + 3.0f * G3_CONST;
+        float y3 = y0 - 1.0f + 3.0f * G3_CONST;
+        float z3 = z0 - 1.0f + 3.0f * G3_CONST;
+
+        int ii = i & 255;
+        int jj = j & 255;
+        int kk = k & 255;
+        int gi0 = get_permMod12(ii + get_perm(jj + get_perm(kk)));
+        int gi1 = get_permMod12(ii + i1 + get_perm(jj + j1 + get_perm(kk + k1)));
+        int gi2 = get_permMod12(ii + i2 + get_perm(jj + j2 + get_perm(kk + k2)));
+        int gi3 = get_permMod12(ii + 1 + get_perm(jj + 1 + get_perm(kk + 1)));
+
+        float t0 = 0.6f - x0 * x0 - y0 * y0 - z0 * z0;
+        if (t0 < 0) n0 = 0.0f;
+        else {
+            t0 *= t0;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g0;
-        get_grad3(gi0, g0);
-        n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
+            float3 g0;
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
 #else
-        float g0[3];
-        get_grad3(gi0, g0);
-        n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
+            float g0[3];
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
 #endif
-    }
+        }
 
-    float t1 = 0.5f - x1 * x1 - y1 * y1 - z1 * z1;
-    if (t1 < 0) {
-        n1 = 0.0f;
-    }
-    else {
-        t1 *= t1;
-
+        float t1 = 0.6f - x1 * x1 - y1 * y1 - z1 * z1;
+        if (t1 < 0) n1 = 0.0f;
+        else {
+            t1 *= t1;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g1;
-        get_grad3(gi1, g1);
-        n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
+            float3 g1;
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
 #else
-        float g1[3];
-        get_grad3(gi1, g1);
-        n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
+            float g1[3];
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
 #endif
-    }
+        }
 
-    float t2 = 0.5f - x2 * x2 - y2 * y2 - z2 * z2;
-    if (t2 < 0) {
-        n2 = 0.0f;
-    }
-    else {
-        t2 *= t2;
-
+        float t2 = 0.6f - x2 * x2 - y2 * y2 - z2 * z2;
+        if (t2 < 0) n2 = 0.0f;
+        else {
+            t2 *= t2;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g2;
-        get_grad3(gi2, g2);
-        n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
+            float3 g2;
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
 #else
-        float g2[3];
-        get_grad3(gi2, g2);
-        n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
+            float g2[3];
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
 #endif
-    }
+        }
 
-    float t3 = 0.5f - x3 * x3 - y3 * y3 - z3 * z3;
-    if (t3 < 0) {
-        n3 = 0.0f;
-    }
-    else {
-        t3 *= t3;
-
+        float t3 = 0.6f - x3 * x3 - y3 * y3 - z3 * z3;
+        if (t3 < 0) n3 = 0.0f;
+        else {
+            t3 *= t3;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g3;
-        get_grad3(gi3, g3);
-        n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
+            float3 g3;
+            get_grad3(gi3, g3);
+            n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
 #else
-        float g3[3];
-        get_grad3(gi3, g3);
-        n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
+            float g3[3];
+            get_grad3(gi3, g3);
+            n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
 #endif
-    }
+        }
 
-    return 70.0f * (n0 + n1 + n2 + n3);
+        return 32.0f * (n0 + n1 + n2 + n3);
+    }
 }
-
 
 GF_KERNEL_FUNCTION(RandomDisplacementKernel,
     ((GF_PTR_READ_ONLY(float4))(inSrc))
@@ -283,28 +373,21 @@ GF_KERNEL_FUNCTION(RandomDisplacementKernel,
     ((int)(inXTiles))
     ((int)(inYTiles))
     ((int)(inMirror))
-    ((float)(inDownsampleX))      
-    ((float)(inDownsampleY)),     
+    ((float)(inDownsampleX))
+    ((float)(inDownsampleY)),
     ((uint2)(inXY)(KERNEL_XY)))
 {
     if (inXY.x < inWidth && inXY.y < inHeight)
     {
-        float layerPosX = inWidth / 2.0f;       
+        float layerPosX = inWidth / 2.0f;
         float layerPosY = inHeight / 2.0f;
+
 
         float adjustedScatter = inScatter / inDownsampleX;
 
-        float dx = simplex_noise(
-            layerPosX * adjustedScatter / 50.0f + inSeed * 54623.245f,
-            -layerPosY * adjustedScatter / 500.0f,
-            inEvolution + inSeed * 49235.319798f
-        );
+        float dx = simplex_noise(layerPosX * adjustedScatter / 50.0f + inSeed * 54623.245f, layerPosY * adjustedScatter / 500.0f, inEvolution + inSeed * 49235.319798f, 3);
 
-        float dy = simplex_noise(
-            layerPosX * adjustedScatter / 50.0f,
-            layerPosY * adjustedScatter / 500.0f + inSeed * 8723.5647f,
-            inEvolution + 7468.329f + inSeed * 19337.940385f
-        );
+        float dy = simplex_noise(layerPosX * adjustedScatter / 50.0f, layerPosY * adjustedScatter / 500.0f + inSeed * 8723.5647f, inEvolution + 7468.329f + inSeed * 19337.940385f, 3);
 
         dx *= -inMagnitude * inDownsampleX;
         dy *= inMagnitude * inDownsampleY;
@@ -415,8 +498,8 @@ void RandomDisplacement_CUDA(
     int x_tiles,
     int y_tiles,
     int mirror,
-    float downsample_x,      
-    float downsample_y)      
+    float downsample_x,
+    float downsample_y)
 {
     dim3 blockDim(16, 16, 1);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
@@ -424,7 +507,7 @@ void RandomDisplacement_CUDA(
     RandomDisplacementKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst,
         srcPitch, dstPitch, is16f, width, height,
         magnitude, evolution, seed, scatter, x_tiles, y_tiles, mirror,
-        downsample_x, downsample_y);     
+        downsample_x, downsample_y);
 
     cudaDeviceSynchronize();
 }

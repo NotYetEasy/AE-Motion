@@ -5,28 +5,35 @@
 
 class SimplexNoise {
 private:
-    static const double F2;
-    static const double F3;
-    static const double F4;
-    static const double G2;
-    static const double G3;
-    static const double G4;
+    static const float F2;
+    static const float F3;
+    static const float F4;
+    static const float G2;
+    static const float G3;
+    static const float G4;
 
     static const int p[256];
-    static const int perm[512];
-    static const int permMod12[512];
+    static int perm[512];
+    static int permMod12[512];
 
-    static const double grad3[12][3];
-    static const double grad4[32][4];
+    static const float grad3[12][3];
+    static const float grad4[32][4];
 
-    static double dot(const double g[3], double x, double y, double z);
-    static double dot(const double g[4], double x, double y, double z, double w);
-    static int fastfloor(double x);
+    static float dot(const float g[3], float x, float y, float z);
+    static float dot(const float g[4], float x, float y, float z, float w);
+    static int fastfloor(float x);
 
 public:
-    static double noise(double x, double y);
+    static void initPerm();
 
-    static double noise(double x, double y, double z);
-
-    static double noise(double x, double y, double z, double w);
+    static float noise(float x, float y);
+    static float noise(float x, float y, float z);
+    static float noise(float x, float y, float z, float w);
+    static float noise(float x, float y, float z, int dimensions);
+    static int get_p(int idx);
+    static int get_perm(int idx);
+    static int get_permMod12(int idx);
+    static void get_grad3(int idx, float grad[3]);
+    static float dot_product(float* g, float x, float y, float z);
+    static float simplex_noise(float x, float y, float z = 0.0f, int dimensions = 3);
 };
