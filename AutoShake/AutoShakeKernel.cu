@@ -14,7 +14,6 @@
 #define fmaxf max
 #define fminf min
 
-
 static const int p_array[256] = {
     151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225,
     140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148,
@@ -42,6 +41,14 @@ static const float grad3_array[12][3] = {
 
 GF_DEVICE_FUNCTION int get_p(int idx) {
     return p_array[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_perm(int idx) {
+    return p_array[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_permMod12(int idx) {
+    return get_perm(idx) % 12;
 }
 
 GF_DEVICE_FUNCTION void get_grad3(int idx, out float3 grad) {
@@ -80,6 +87,14 @@ GF_DEVICE_FUNCTION int get_p(int idx) {
     return p[idx & 0xFF];
 }
 
+GF_DEVICE_FUNCTION int get_perm(int idx) {
+    return p[idx & 0xFF];
+}
+
+GF_DEVICE_FUNCTION int get_permMod12(int idx) {
+    return get_perm(idx) % 12;
+}
+
 GF_DEVICE_FUNCTION void get_grad3(int idx, float* grad) {
     idx = idx % 12;
     grad[0] = grad3[idx][0];
@@ -112,10 +127,10 @@ __device__ float fmodf_custom(float x, float y) {
     return x - y * floor(x / y);
 }
 
-#define F2_CONST 0.366025404f       
-#define G2_CONST 0.211324865f       
-#define F3_CONST 0.333333333f     
-#define G3_CONST 0.166666667f     
+#define F2_CONST 0.366025404f            
+#define G2_CONST 0.211324865f            
+#define F3_CONST 0.333333333f          
+#define G3_CONST 0.166666667f          
 
 GF_DEVICE_FUNCTION int fastfloor(float x) {
     int xi = (int)x;
@@ -132,145 +147,216 @@ GF_DEVICE_FUNCTION float dot_product(float* g, float x, float y, float z) {
 }
 #endif
 
-GF_DEVICE_FUNCTION float simplex_noise(float xin, float yin, float zin) {
-    float n0, n1, n2, n3;       
+GF_DEVICE_FUNCTION float simplex_noise(float x, float y, float z = 0.0f, int dimensions = 3) {
+    if (dimensions == 2) {
+        float n0, n1, n2;
 
-    float s = (xin + yin + zin) * F3_CONST;         
-    int i = fastfloor(xin + s);
-    int j = fastfloor(yin + s);
-    int k = fastfloor(zin + s);
+        float s = (x + y) * F2_CONST;
+        int i = fastfloor(x + s);
+        int j = fastfloor(y + s);
 
-    float t = (i + j + k) * G3_CONST;
-    float X0 = i - t;         
-    float Y0 = j - t;
-    float Z0 = k - t;
-    float x0 = xin - X0;        
-    float y0 = yin - Y0;
-    float z0 = zin - Z0;
+        float t = (i + j) * G2_CONST;
+        float X0 = i - t;
+        float Y0 = j - t;
+        float x0 = x - X0;
+        float y0 = y - Y0;
 
-    int i1, j1, k1;          
-    int i2, j2, k2;          
-
-    if (x0 >= y0) {
-        if (y0 >= z0) {     
-            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+        int i1, j1;
+        if (x0 > y0) {
+            i1 = 1;
+            j1 = 0;
         }
-        else if (x0 >= z0) {     
-            i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+        else {
+            i1 = 0;
+            j1 = 1;
         }
-        else {     
-            i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
-        }
-    }
-    else {  
-        if (y0 < z0) {     
-            i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
-        }
-        else if (x0 < z0) {     
-            i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
-        }
-        else {     
-            i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
-        }
-    }
 
-    float x1 = x0 - i1 + G3_CONST;        
-    float y1 = y0 - j1 + G3_CONST;
-    float z1 = z0 - k1 + G3_CONST;
-    float x2 = x0 - i2 + 2.0f * G3_CONST;        
-    float y2 = y0 - j2 + 2.0f * G3_CONST;
-    float z2 = z0 - k2 + 2.0f * G3_CONST;
-    float x3 = x0 - 1.0f + 3.0f * G3_CONST;        
-    float y3 = y0 - 1.0f + 3.0f * G3_CONST;
-    float z3 = z0 - 1.0f + 3.0f * G3_CONST;
+        float x1 = x0 - i1 + G2_CONST;
+        float y1 = y0 - j1 + G2_CONST;
+        float x2 = x0 - 1.0f + 2.0f * G2_CONST;
+        float y2 = y0 - 1.0f + 2.0f * G2_CONST;
 
-    int ii = i & 255;
-    int jj = j & 255;
-    int kk = k & 255;
+        int ii = i & 255;
+        int jj = j & 255;
+        int gi0 = get_permMod12(ii + get_perm(jj));
+        int gi1 = get_permMod12(ii + i1 + get_perm(jj + j1));
+        int gi2 = get_permMod12(ii + 1 + get_perm(jj + 1));
 
-    int gi0 = get_p(ii + get_p(jj + get_p(kk))) % 12;
-    int gi1 = get_p(ii + i1 + get_p(jj + j1 + get_p(kk + k1))) % 12;
-    int gi2 = get_p(ii + i2 + get_p(jj + j2 + get_p(kk + k2))) % 12;
-    int gi3 = get_p(ii + 1 + get_p(jj + 1 + get_p(kk + 1))) % 12;
+        float t0 = 0.5f - x0 * x0 - y0 * y0;
+        if (t0 < 0) {
+            n0 = 0.0f;
+        }
+        else {
+            t0 *= t0;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g0;
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, 0);
+#else
+            float g0[3];
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, 0);
+#endif
+        }
 
-    float t0 = 0.5f - x0 * x0 - y0 * y0 - z0 * z0;
-    if (t0 < 0) {
-        n0 = 0.0f;
+        float t1 = 0.5f - x1 * x1 - y1 * y1;
+        if (t1 < 0) {
+            n1 = 0.0f;
+        }
+        else {
+            t1 *= t1;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g1;
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, 0);
+#else
+            float g1[3];
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, 0);
+#endif
+        }
+
+        float t2 = 0.5f - x2 * x2 - y2 * y2;
+        if (t2 < 0) {
+            n2 = 0.0f;
+        }
+        else {
+            t2 *= t2;
+#if GF_DEVICE_TARGET_HLSL
+            float3 g2;
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, 0);
+#else
+            float g2[3];
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, 0);
+#endif
+        }
+
+        return 70.0f * (n0 + n1 + n2);
     }
     else {
-        t0 *= t0;
+        float n0, n1, n2, n3;
 
+        float s = (x + y + z) * F3_CONST;
+        int i = fastfloor(x + s);
+        int j = fastfloor(y + s);
+        int k = fastfloor(z + s);
+
+        float t = (i + j + k) * G3_CONST;
+        float X0 = i - t;
+        float Y0 = j - t;
+        float Z0 = k - t;
+        float x0 = x - X0;
+        float y0 = y - Y0;
+        float z0 = z - Z0;
+
+        int i1, j1, k1;
+        int i2, j2, k2;
+        if (x0 >= y0) {
+            if (y0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+            }
+            else if (x0 >= z0) {
+                i1 = 1; j1 = 0; k1 = 0; i2 = 1; j2 = 0; k2 = 1;
+            }
+            else {
+                i1 = 0; j1 = 0; k1 = 1; i2 = 1; j2 = 0; k2 = 1;
+            }
+        }
+        else {
+            if (y0 < z0) {
+                i1 = 0; j1 = 0; k1 = 1; i2 = 0; j2 = 1; k2 = 1;
+            }
+            else if (x0 < z0) {
+                i1 = 0; j1 = 1; k1 = 0; i2 = 0; j2 = 1; k2 = 1;
+            }
+            else {
+                i1 = 0; j1 = 1; k1 = 0; i2 = 1; j2 = 1; k2 = 0;
+            }
+        }
+
+        float x1 = x0 - i1 + G3_CONST;
+        float y1 = y0 - j1 + G3_CONST;
+        float z1 = z0 - k1 + G3_CONST;
+        float x2 = x0 - i2 + 2.0f * G3_CONST;
+        float y2 = y0 - j2 + 2.0f * G3_CONST;
+        float z2 = z0 - k2 + 2.0f * G3_CONST;
+        float x3 = x0 - 1.0f + 3.0f * G3_CONST;
+        float y3 = y0 - 1.0f + 3.0f * G3_CONST;
+        float z3 = z0 - 1.0f + 3.0f * G3_CONST;
+
+        int ii = i & 255;
+        int jj = j & 255;
+        int kk = k & 255;
+        int gi0 = get_permMod12(ii + get_perm(jj + get_perm(kk)));
+        int gi1 = get_permMod12(ii + i1 + get_perm(jj + j1 + get_perm(kk + k1)));
+        int gi2 = get_permMod12(ii + i2 + get_perm(jj + j2 + get_perm(kk + k2)));
+        int gi3 = get_permMod12(ii + 1 + get_perm(jj + 1 + get_perm(kk + 1)));
+
+        float t0 = 0.6f - x0 * x0 - y0 * y0 - z0 * z0;
+        if (t0 < 0) n0 = 0.0f;
+        else {
+            t0 *= t0;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g0;
-        get_grad3(gi0, g0);
-        n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
+            float3 g0;
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
 #else
-        float g0[3];
-        get_grad3(gi0, g0);
-        n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
+            float g0[3];
+            get_grad3(gi0, g0);
+            n0 = t0 * t0 * dot_product(g0, x0, y0, z0);
 #endif
-    }
+        }
 
-    float t1 = 0.5f - x1 * x1 - y1 * y1 - z1 * z1;
-    if (t1 < 0) {
-        n1 = 0.0f;
-    }
-    else {
-        t1 *= t1;
-
+        float t1 = 0.6f - x1 * x1 - y1 * y1 - z1 * z1;
+        if (t1 < 0) n1 = 0.0f;
+        else {
+            t1 *= t1;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g1;
-        get_grad3(gi1, g1);
-        n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
+            float3 g1;
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
 #else
-        float g1[3];
-        get_grad3(gi1, g1);
-        n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
+            float g1[3];
+            get_grad3(gi1, g1);
+            n1 = t1 * t1 * dot_product(g1, x1, y1, z1);
 #endif
-    }
+        }
 
-    float t2 = 0.5f - x2 * x2 - y2 * y2 - z2 * z2;
-    if (t2 < 0) {
-        n2 = 0.0f;
-    }
-    else {
-        t2 *= t2;
-
+        float t2 = 0.6f - x2 * x2 - y2 * y2 - z2 * z2;
+        if (t2 < 0) n2 = 0.0f;
+        else {
+            t2 *= t2;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g2;
-        get_grad3(gi2, g2);
-        n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
+            float3 g2;
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
 #else
-        float g2[3];
-        get_grad3(gi2, g2);
-        n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
+            float g2[3];
+            get_grad3(gi2, g2);
+            n2 = t2 * t2 * dot_product(g2, x2, y2, z2);
 #endif
-    }
+        }
 
-    float t3 = 0.5f - x3 * x3 - y3 * y3 - z3 * z3;
-    if (t3 < 0) {
-        n3 = 0.0f;
-    }
-    else {
-        t3 *= t3;
-
+        float t3 = 0.6f - x3 * x3 - y3 * y3 - z3 * z3;
+        if (t3 < 0) n3 = 0.0f;
+        else {
+            t3 *= t3;
 #if GF_DEVICE_TARGET_HLSL
-        float3 g3;
-        get_grad3(gi3, g3);
-        n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
+            float3 g3;
+            get_grad3(gi3, g3);
+            n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
 #else
-        float g3[3];
-        get_grad3(gi3, g3);
-        n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
+            float g3[3];
+            get_grad3(gi3, g3);
+            n3 = t3 * t3 * dot_product(g3, x3, y3, z3);
 #endif
-    }
+        }
 
-    return 70.0f * (n0 + n1 + n2 + n3);
+        return 32.0f * (n0 + n1 + n2 + n3);
+    }
 }
-
-
-#define F3_CONST 0.333333333f     
-#define G3_CONST 0.166666667f     
 
 GF_KERNEL_FUNCTION(AutoShakeKernel,
     ((GF_PTR_READ_ONLY(float4))(inSrc))
@@ -278,8 +364,10 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
     ((int)(inSrcPitch))
     ((int)(inDstPitch))
     ((int)(in16f))
-    ((unsigned int)(inWidth))
-    ((unsigned int)(inHeight))
+    ((unsigned int)(inSrcWidth))
+    ((unsigned int)(inSrcHeight))
+    ((unsigned int)(inDstWidth))
+    ((unsigned int)(inDstHeight))
     ((float)(inMagnitude))
     ((float)(inFrequency))
     ((float)(inEvolution))
@@ -301,16 +389,27 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
     ((float)(inCompatibilitySeed))
     ((float)(inCompatibilityAngle))
     ((float)(inCompatibilitySlack))
-    ((float)(inAccumulatedPhase))  // New parameter for accumulated phase
-    ((int)(inHasFrequencyKeyframes)),  // New parameter for keyframe flag
+    ((float)(inAccumulatedPhase))
+    ((int)(inHasFrequencyKeyframes)),
     ((uint2)(inXY)(KERNEL_XY)))
 {
-    if (inXY.x < inWidth && inXY.y < inHeight)
+    if (inXY.x < inDstWidth && inXY.y < inDstHeight)
     {
+        int shake_src_x = (int)inXY.x;
+        int shake_src_y = (int)inXY.y;
+
         if ((inNormalMode == 0 && inCompatibilityMode == 0) ||
             (inNormalMode != 0 && inCompatibilityMode != 0)) {
-            float4 pixel = ReadFloat4(inSrc, inXY.y * inSrcPitch + inXY.x, !!in16f);
-            WriteFloat4(pixel, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+
+            if (shake_src_x >= 0 && shake_src_x < inSrcWidth &&
+                shake_src_y >= 0 && shake_src_y < inSrcHeight) {
+                float4 pixel = ReadFloat4(inSrc, shake_src_y * inSrcPitch + shake_src_x, !!in16f);
+                WriteFloat4(pixel, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+            }
+            else {
+                float4 transparent = { 0.0f, 0.0f, 0.0f, 0.0f };
+                WriteFloat4(transparent, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+            }
             return;
         }
 
@@ -323,17 +422,16 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
             s = sin(angleRad);
             c = cos(angleRad);
 
-            // Use accumulated phase if available, otherwise use traditional calculation
             if (inHasFrequencyKeyframes != 0) {
-                evolutionValue = inEvolution - inAccumulatedPhase;
+                evolutionValue = inEvolution + inAccumulatedPhase;
             }
             else {
-                evolutionValue = inEvolution - inFrequency * inCurrentTime;
+                evolutionValue = inEvolution + inFrequency * inCurrentTime;
             }
 
-            dx = simplex_noise(evolutionValue, inSeed * 49235.319798f, 0.0f);
-            dy = simplex_noise(evolutionValue + 7468.329f, inSeed * 19337.940385f, 0.0f);
-            dz = simplex_noise(evolutionValue + 14192.277f, inSeed * 71401.168533f, 0.0f);
+            dx = simplex_noise(evolutionValue, inSeed * 49235.319798f, 0.0f, 2);
+            dy = simplex_noise(evolutionValue + 7468.329f, inSeed * 19337.940385f, 0.0f, 2);
+            dz = simplex_noise(evolutionValue + 14192.277f, inSeed * 71401.168533f, 0.0f, 2);
 
             dx *= inMagnitude * inDownsampleX;
             dy *= inMagnitude * inSlack * inDownsampleY;
@@ -344,14 +442,10 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
             s = sin(angleRad);
             c = cos(angleRad);
 
-            evolutionValue = inCompatibilityEvolution +
-                (inCurrentTime * inCompatibilitySpeed) -
-                inCompatibilitySpeed;
+            evolutionValue = inCompatibilityEvolution + (inCurrentTime * inCompatibilitySpeed) - inCompatibilitySpeed;
 
-            dx = simplex_noise(inCompatibilitySeed * 54623.245f, 0.0f,
-                evolutionValue + inCompatibilitySeed * 49235.319798f);
-            dy = simplex_noise(0.0f, inCompatibilitySeed * 8723.5647f,
-                evolutionValue + 7468.329f + inCompatibilitySeed * 19337.940385f);
+            dx = simplex_noise(inCompatibilitySeed * 54623.245f, 0.0f, evolutionValue + inCompatibilitySeed * 49235.319798f, 3);
+            dy = simplex_noise(0.0f, inCompatibilitySeed * 8723.5647f, evolutionValue + 7468.329f + inCompatibilitySeed * 19337.940385f, 3);
 
             dx *= inCompatibilityMagnitude * inDownsampleX;
             dy *= inCompatibilityMagnitude * inCompatibilitySlack * inDownsampleY;
@@ -363,12 +457,12 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
         float rx = dx * c - dy * s;
         float ry = dx * s + dy * c;
 
-        float srcX = (float)inXY.x - rx;
-        float srcY = (float)inXY.y - ry;
+        float srcX = (float)shake_src_x - rx;
+        float srcY = (float)shake_src_y - ry;
 
         if (dz != 0) {
-            float centerX = (float)inWidth / 2.0f;
-            float centerY = (float)inHeight / 2.0f;
+            float centerX = (float)inSrcWidth / 2.0f;
+            float centerY = (float)inSrcHeight / 2.0f;
 
             float relX = srcX - centerX;
             float relY = srcY - centerY;
@@ -387,85 +481,83 @@ GF_KERNEL_FUNCTION(AutoShakeKernel,
 
         if (inXTiles) {
             if (inMirror) {
-                float intPart = floor(fabs(srcX / inWidth));
-                float fracPart = fabs(srcX / inWidth) - intPart;
+                float intPart = floor(fabs(srcX / inSrcWidth));
+                float fracPart = fabs(srcX / inSrcWidth) - intPart;
                 int isOdd = (int)intPart & 1;
-                srcX = isOdd ? (1.0f - fracPart) * inWidth : fracPart * inWidth;
+                srcX = isOdd ? (1.0f - fracPart) * inSrcWidth : fracPart * inSrcWidth;
             }
             else {
-                srcX = fmodf(fmodf(srcX, (float)inWidth) + inWidth, (float)inWidth);
+                srcX = fmodf_custom(fmodf_custom(srcX, (float)inSrcWidth) + inSrcWidth, (float)inSrcWidth);
             }
         }
         else {
-            if (srcX < 0 || srcX >= inWidth) {
+            if (srcX < 0 || srcX >= inSrcWidth) {
                 outsideBounds = true;
             }
         }
 
         if (inYTiles) {
             if (inMirror) {
-                float intPart = floor(fabs(srcY / inHeight));
-                float fracPart = fabs(srcY / inHeight) - intPart;
+                float intPart = floor(fabs(srcY / inSrcHeight));
+                float fracPart = fabs(srcY / inSrcHeight) - intPart;
                 int isOdd = (int)intPart & 1;
-                srcY = isOdd ? (1.0f - fracPart) * inHeight : fracPart * inHeight;
+                srcY = isOdd ? (1.0f - fracPart) * inSrcHeight : fracPart * inSrcHeight;
             }
             else {
-                srcY = fmodf(fmodf(srcY, (float)inHeight) + inHeight, (float)inHeight);
+                srcY = fmodf_custom(fmodf_custom(srcY, (float)inSrcHeight) + inSrcHeight, (float)inSrcHeight);
             }
         }
         else {
-            if (srcY < 0 || srcY >= inHeight) {
+            if (srcY < 0 || srcY >= inSrcHeight) {
                 outsideBounds = true;
             }
         }
 
+        float4 result;
+
         if (outsideBounds) {
-            float4 transparent = { 0.0f, 0.0f, 0.0f, 0.0f };
-            WriteFloat4(transparent, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
-            return;
+            result.x = 0.0f;
+            result.y = 0.0f;
+            result.z = 0.0f;
+            result.w = 0.0f;
+        }
+        else {
+            srcX = fmax(0.0f, fmin(inSrcWidth - 1.001f, srcX));
+            srcY = fmax(0.0f, fmin(inSrcHeight - 1.001f, srcY));
+
+            int x0 = (int)floor(srcX);
+            int y0 = (int)floor(srcY);
+            int x1 = x0 + 1;
+            int y1 = y0 + 1;
+
+            float fx = srcX - x0;
+            float fy = srcY - y0;
+
+            x0 = max_int(0, min_int(x0, (int)inSrcWidth - 1));
+            y0 = max_int(0, min_int(y0, (int)inSrcHeight - 1));
+            x1 = max_int(0, min_int(x1, (int)inSrcWidth - 1));
+            y1 = max_int(0, min_int(y1, (int)inSrcHeight - 1));
+
+            float4 p00 = ReadFloat4(inSrc, y0 * inSrcPitch + x0, !!in16f);
+            float4 p01 = ReadFloat4(inSrc, y1 * inSrcPitch + x0, !!in16f);
+            float4 p10 = ReadFloat4(inSrc, y0 * inSrcPitch + x1, !!in16f);
+            float4 p11 = ReadFloat4(inSrc, y1 * inSrcPitch + x1, !!in16f);
+
+            float oneMinusFx = 1.0f - fx;
+            float oneMinusFy = 1.0f - fy;
+
+            float w00 = oneMinusFx * oneMinusFy;
+            float w10 = fx * oneMinusFy;
+            float w01 = oneMinusFx * fy;
+            float w11 = fx * fy;
+
+            result.x = p00.x * w00 + p10.x * w10 + p01.x * w01 + p11.x * w11;
+            result.y = p00.y * w00 + p10.y * w10 + p01.y * w01 + p11.y * w11;
+            result.z = p00.z * w00 + p10.z * w10 + p01.z * w01 + p11.z * w11;
+            result.w = p00.w * w00 + p10.w * w10 + p01.w * w01 + p11.w * w11;
         }
 
-        srcX = fmaxf(0.0f, fminf((float)inWidth - 1.001f, srcX));
-        srcY = fmaxf(0.0f, fminf((float)inHeight - 1.001f, srcY));
-
-        int x0 = (int)srcX;
-        int y0 = (int)srcY;
-        int x1 = min(x0 + 1, (int)inWidth - 1);
-        int y1 = min(y0 + 1, (int)inHeight - 1);
-
-        float fx = srcX - x0;
-        float fy = srcY - y0;
-
-        float4 p00 = ReadFloat4(inSrc, y0 * inSrcPitch + x0, !!in16f);
-        float4 p01 = ReadFloat4(inSrc, y0 * inSrcPitch + x1, !!in16f);
-        float4 p10 = ReadFloat4(inSrc, y1 * inSrcPitch + x0, !!in16f);
-        float4 p11 = ReadFloat4(inSrc, y1 * inSrcPitch + x1, !!in16f);
-
-        float4 pixel;
-        float oneMinusFx = 1.0f - fx;
-        float oneMinusFy = 1.0f - fy;
-
-        pixel.x = oneMinusFx * oneMinusFy * p00.x +
-            fx * oneMinusFy * p01.x +
-            oneMinusFx * fy * p10.x +
-            fx * fy * p11.x;
-
-        pixel.y = oneMinusFx * oneMinusFy * p00.y +
-            fx * oneMinusFy * p01.y +
-            oneMinusFx * fy * p10.y +
-            fx * fy * p11.y;
-
-        pixel.z = oneMinusFx * oneMinusFy * p00.z +
-            fx * oneMinusFy * p01.z +
-            oneMinusFx * fy * p10.z +
-            fx * fy * p11.z;
-
-        pixel.w = oneMinusFx * oneMinusFy * p00.w +
-            fx * oneMinusFy * p01.w +
-            oneMinusFx * fy * p10.w +
-            fx * fy * p11.w;
-
-        WriteFloat4(pixel, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
+        WriteFloat4(result, outDst, inXY.y * inDstPitch + inXY.x, !!in16f);
     }
 }
 
@@ -477,8 +569,10 @@ void AutoShake_CUDA(
     unsigned int srcPitch,
     unsigned int dstPitch,
     int is16f,
-    unsigned int width,
-    unsigned int height,
+    unsigned int srcWidth,
+    unsigned int srcHeight,
+    unsigned int dstWidth,
+    unsigned int dstHeight,
     float magnitude,
     float frequency,
     float evolution,
@@ -504,10 +598,10 @@ void AutoShake_CUDA(
     int has_frequency_keyframes)
 {
     dim3 blockDim(16, 16, 1);
-    dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y, 1);
+    dim3 gridDim((dstWidth + blockDim.x - 1) / blockDim.x, (dstHeight + blockDim.y - 1) / blockDim.y, 1);
 
-    AutoShakeKernel << < gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst,
-        srcPitch, dstPitch, is16f, width, height,
+    AutoShakeKernel << <gridDim, blockDim, 0 >> > ((float4 const*)src, (float4*)dst,
+        srcPitch, dstPitch, is16f, srcWidth, srcHeight, dstWidth, dstHeight,
         magnitude, frequency, evolution, seed, angle, slack, zshake,
         x_tiles, y_tiles, mirror, currentTime, downsample_x, downsample_y,
         normal_mode, compatibility_mode, compatibility_magnitude, compatibility_speed,
@@ -518,4 +612,3 @@ void AutoShake_CUDA(
 }
 #endif
 #endif
-

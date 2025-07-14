@@ -28,8 +28,10 @@ extern void AutoShake_CUDA(
 	unsigned int srcPitch,
 	unsigned int dstPitch,
 	int is16f,
-	unsigned int width,
-	unsigned int height,
+	unsigned int srcWidth,
+	unsigned int srcHeight,
+	unsigned int dstWidth,
+	unsigned int dstHeight,
 	float magnitude,
 	float frequency,
 	float evolution,
@@ -53,6 +55,7 @@ extern void AutoShake_CUDA(
 	float compatibility_slack,
 	float accumulated_phase,
 	int has_frequency_keyframes);
+
 
 
 static PF_Err
@@ -137,11 +140,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Magnitude",
-		0,        
-		2000,     
-		0,         
-		2000,      
-		50,       
+		0,
+		2000,
+		0,
+		2000,
+		50,
 		PF_Precision_INTEGER,
 		0,
 		0,
@@ -149,11 +152,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Frequency",
-		0,        
-		16,       
-		0,         
-		5,         
-		2,        
+		0,
+		16,
+		0,
+		5,
+		2,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -161,11 +164,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Evolution",
-		0,        
-		2000,     
-		0,         
-		2,         
-		0,        
+		0,
+		2000,
+		0,
+		2,
+		0,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -173,11 +176,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Seed",
-		0,        
-		5,        
-		0,         
-		5,         
-		0,        
+		0,
+		5,
+		0,
+		5,
+		0,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -202,11 +205,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Z Shake",
-		0,      
-		2000,      
-		0,       
-		200,       
-		0,     
+		0,
+		2000,
+		0,
+		200,
+		0,
 		PF_Precision_INTEGER,
 		0,
 		0,
@@ -215,7 +218,7 @@ ParamsSetup(
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_START;
 	PF_STRCPY(def.name, "Tiles");
-	def.flags = PF_ParamFlag_START_COLLAPSED;      
+	def.flags = PF_ParamFlag_START_COLLAPSED;
 	PF_ADD_PARAM(in_data, TILES_GROUP_START, &def);
 
 	AEFX_CLR_STRUCT(def);
@@ -246,7 +249,7 @@ ParamsSetup(
 	AEFX_CLR_STRUCT(def);
 	def.param_type = PF_Param_GROUP_START;
 	PF_STRCPY(def.name, "Compatibility");
-	def.flags = PF_ParamFlag_START_COLLAPSED;      
+	def.flags = PF_ParamFlag_START_COLLAPSED;
 	PF_ADD_PARAM(in_data, COMPATIBILITY_GROUP_START, &def);
 
 	AEFX_CLR_STRUCT(def);
@@ -258,11 +261,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Magnitude",
-		0,        
-		2000,     
-		0,         
-		2000,      
-		50,       
+		0,
+		2000,
+		0,
+		2000,
+		50,
 		PF_Precision_INTEGER,
 		0,
 		0,
@@ -270,11 +273,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Speed",
-		0.00,     
-		2000.00,  
-		0.00,      
-		2000.00,   
-		1.00,     
+		0.00,
+		2000.00,
+		0.00,
+		2000.00,
+		1.00,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -282,11 +285,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Evolution",
-		0.00,     
-		2000.00,  
-		0.00,      
-		2.00,   
-		0.00,     
+		0.00,
+		2000.00,
+		0.00,
+		2.00,
+		0.00,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -294,11 +297,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Seed",
-		0.00,     
-		5.00,     
-		0.00,      
-		5.00,      
-		0.00,     
+		0.00,
+		5.00,
+		0.00,
+		5.00,
+		0.00,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -311,11 +314,11 @@ ParamsSetup(
 
 	AEFX_CLR_STRUCT(def);
 	PF_ADD_FLOAT_SLIDERX("Slack",
-		0.00,     
-		1.00,     
-		0.00,      
-		1.00,      
-		0.25,     
+		0.00,
+		1.00,
+		0.00,
+		1.00,
+		0.25,
 		PF_Precision_HUNDREDTHS,
 		0,
 		0,
@@ -902,9 +905,9 @@ ProcessAutoShake(
 			evolutionValue = info->evolution + info->frequency * renderData->current_time;
 		}
 
-		dx = SimplexNoise::noise(evolutionValue, info->seed * 49235.319798);
-		dy = SimplexNoise::noise(evolutionValue + 7468.329, info->seed * 19337.940385);
-		dz = SimplexNoise::noise(evolutionValue + 14192.277, info->seed * 71401.168533);
+		dx = SimplexNoise::simplex_noise(evolutionValue, info->seed * 49235.319798f, 0.0f, 2);
+		dy = SimplexNoise::simplex_noise(evolutionValue + 7468.329f, info->seed * 19337.940385f, 0.0f, 2);
+		dz = SimplexNoise::simplex_noise(evolutionValue + 14192.277f, info->seed * 71401.168533f, 0.0f, 2);
 
 		dx *= info->magnitude;
 		dy *= info->magnitude * info->slack;
@@ -915,14 +918,10 @@ ProcessAutoShake(
 		s = sin(angleRad);
 		c = cos(angleRad);
 
-		evolutionValue = info->compatibility_evolution +
-			(renderData->current_time * info->compatibility_speed) -
-			info->compatibility_speed;
+		evolutionValue = info->compatibility_evolution + (renderData->current_time * info->compatibility_speed) - info->compatibility_speed;
 
-		dx = SimplexNoise::noise(info->compatibility_seed * 54623.245, 0,
-			evolutionValue + info->compatibility_seed * 49235.319798);
-		dy = SimplexNoise::noise(0, info->compatibility_seed * 8723.5647,
-			evolutionValue + 7468.329 + info->compatibility_seed * 19337.940385);
+		dx = SimplexNoise::simplex_noise(info->compatibility_seed * 54623.245, 0, evolutionValue + info->compatibility_seed * 49235.319798, 3);
+		dy = SimplexNoise::simplex_noise(0, info->compatibility_seed * 8723.5647, evolutionValue + 7468.329 + info->compatibility_seed * 19337.940385, 3);
 
 		dx *= info->compatibility_magnitude;
 		dy *= info->compatibility_magnitude * info->compatibility_slack;
@@ -1606,8 +1605,10 @@ typedef struct
 	int mSrcPitch;
 	int mDstPitch;
 	int m16f;
-	int mWidth;
-	int mHeight;
+	int mSrcWidth;
+	int mSrcHeight;
+	int mDstWidth;
+	int mDstHeight;
 	float mMagnitude;
 	float mFrequency;
 	float mEvolution;
@@ -1632,7 +1633,6 @@ typedef struct
 	float mAccumulatedPhase;
 	int mHasFrequencyKeyframes;
 } AutoShakeParams;
-
 
 static PF_Err
 SmartRenderGPU(
@@ -1672,8 +1672,10 @@ SmartRenderGPU(
 	ERR(gpu_suite->GetGPUWorldData(in_dataP->effect_ref, output_worldP, &dst_mem));
 
 	AutoShakeParams autoshake_params;
-	autoshake_params.mWidth = input_worldP->width;
-	autoshake_params.mHeight = input_worldP->height;
+	autoshake_params.mSrcWidth = input_worldP->width;
+	autoshake_params.mSrcHeight = input_worldP->height;
+	autoshake_params.mDstWidth = output_worldP->width;
+	autoshake_params.mDstHeight = output_worldP->height;
 	autoshake_params.mSrcPitch = input_worldP->rowbytes / bytes_per_pixel;
 	autoshake_params.mDstPitch = output_worldP->rowbytes / bytes_per_pixel;
 	autoshake_params.m16f = (pixel_format != PF_PixelFormat_GPU_BGRA128);
@@ -1719,8 +1721,10 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mSrcPitch));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mDstPitch));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.m16f));
-		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mWidth));
-		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mHeight));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mSrcWidth));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mSrcHeight));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mDstWidth));
+		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mDstHeight));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &autoshake_params.mMagnitude));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &autoshake_params.mFrequency));
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(float), &autoshake_params.mEvolution));
@@ -1746,7 +1750,7 @@ SmartRenderGPU(
 		CL_ERR(clSetKernelArg(cl_gpu_dataP->autoshake_kernel, param_index++, sizeof(int), &autoshake_params.mHasFrequencyKeyframes));
 
 		size_t threadBlock[2] = { 16, 16 };
-		size_t grid[2] = { RoundUp(autoshake_params.mWidth, threadBlock[0]), RoundUp(autoshake_params.mHeight, threadBlock[1]) };
+		size_t grid[2] = { RoundUp(autoshake_params.mDstWidth, threadBlock[0]), RoundUp(autoshake_params.mDstHeight, threadBlock[1]) };
 
 		CL_ERR(clEnqueueNDRangeKernel(
 			(cl_command_queue)device_info.command_queuePV,
@@ -1767,8 +1771,10 @@ SmartRenderGPU(
 			autoshake_params.mSrcPitch,
 			autoshake_params.mDstPitch,
 			autoshake_params.m16f,
-			autoshake_params.mWidth,
-			autoshake_params.mHeight,
+			autoshake_params.mSrcWidth,
+			autoshake_params.mSrcHeight,
+			autoshake_params.mDstWidth,
+			autoshake_params.mDstHeight,
 			autoshake_params.mMagnitude,
 			autoshake_params.mFrequency,
 			autoshake_params.mEvolution,
@@ -1808,8 +1814,10 @@ SmartRenderGPU(
 			int mSrcPitch;
 			int mDstPitch;
 			int m16f;
-			int mWidth;
-			int mHeight;
+			int mSrcWidth;
+			int mSrcHeight;
+			int mDstWidth;
+			int mDstHeight;
 			float mMagnitude;
 			float mFrequency;
 			float mEvolution;
@@ -1838,8 +1846,10 @@ SmartRenderGPU(
 		complete_params.mSrcPitch = autoshake_params.mSrcPitch;
 		complete_params.mDstPitch = autoshake_params.mDstPitch;
 		complete_params.m16f = autoshake_params.m16f;
-		complete_params.mWidth = autoshake_params.mWidth;
-		complete_params.mHeight = autoshake_params.mHeight;
+		complete_params.mSrcWidth = autoshake_params.mSrcWidth;
+		complete_params.mSrcHeight = autoshake_params.mSrcHeight;
+		complete_params.mDstWidth = autoshake_params.mDstWidth;
+		complete_params.mDstHeight = autoshake_params.mDstHeight;
 		complete_params.mMagnitude = autoshake_params.mMagnitude;
 		complete_params.mFrequency = autoshake_params.mFrequency;
 		complete_params.mEvolution = autoshake_params.mEvolution;
@@ -1873,11 +1883,11 @@ SmartRenderGPU(
 		DX_ERR(shaderExecution.SetParamBuffer(&complete_params, sizeof(CompleteAutoShakeParams)));
 		DX_ERR(shaderExecution.SetUnorderedAccessView(
 			(ID3D12Resource*)dst_mem,
-			autoshake_params.mHeight * output_worldP->rowbytes));
+			autoshake_params.mDstHeight * output_worldP->rowbytes));
 		DX_ERR(shaderExecution.SetShaderResourceView(
 			(ID3D12Resource*)src_mem,
-			autoshake_params.mHeight * input_worldP->rowbytes));
-		DX_ERR(shaderExecution.Execute((UINT)DivideRoundUp(autoshake_params.mWidth, 16), (UINT)DivideRoundUp(autoshake_params.mHeight, 16)));
+			autoshake_params.mSrcHeight * input_worldP->rowbytes));
+		DX_ERR(shaderExecution.Execute((UINT)DivideRoundUp(autoshake_params.mDstWidth, 16), (UINT)DivideRoundUp(autoshake_params.mDstHeight, 16)));
 	}
 #endif
 #if HAS_METAL
@@ -1892,8 +1902,10 @@ SmartRenderGPU(
 			int mSrcPitch;
 			int mDstPitch;
 			int m16f;
-			unsigned int mWidth;
-			unsigned int mHeight;
+			unsigned int mSrcWidth;
+			unsigned int mSrcHeight;
+			unsigned int mDstWidth;
+			unsigned int mDstHeight;
 			float mMagnitude;
 			float mFrequency;
 			float mEvolution;
@@ -1922,8 +1934,10 @@ SmartRenderGPU(
 		metal_params.mSrcPitch = autoshake_params.mSrcPitch;
 		metal_params.mDstPitch = autoshake_params.mDstPitch;
 		metal_params.m16f = autoshake_params.m16f;
-		metal_params.mWidth = autoshake_params.mWidth;
-		metal_params.mHeight = autoshake_params.mHeight;
+		metal_params.mSrcWidth = autoshake_params.mSrcWidth;
+		metal_params.mSrcHeight = autoshake_params.mSrcHeight;
+		metal_params.mDstWidth = autoshake_params.mDstWidth;
+		metal_params.mDstHeight = autoshake_params.mDstHeight;
 		metal_params.mMagnitude = autoshake_params.mMagnitude;
 		metal_params.mFrequency = autoshake_params.mFrequency;
 		metal_params.mEvolution = autoshake_params.mEvolution;
@@ -1961,7 +1975,7 @@ SmartRenderGPU(
 		id<MTLBuffer> dst_metal_buffer = (id<MTLBuffer>)dst_mem;
 
 		MTLSize threadsPerGroup = { [metal_dataP->autoshake_pipeline threadExecutionWidth] , 16, 1 };
-		MTLSize numThreadgroups = { DivideRoundUp(autoshake_params.mWidth, threadsPerGroup.width), DivideRoundUp(autoshake_params.mHeight, threadsPerGroup.height), 1 };
+		MTLSize numThreadgroups = { DivideRoundUp(autoshake_params.mDstWidth, threadsPerGroup.width), DivideRoundUp(autoshake_params.mDstHeight, threadsPerGroup.height), 1 };
 
 		[computeEncoder setComputePipelineState : metal_dataP->autoshake_pipeline] ;
 		[computeEncoder setBuffer : src_metal_buffer offset : 0 atIndex : 0] ;
@@ -2050,12 +2064,12 @@ PF_Err PluginDataEntryFunction2(
 	result = PF_REGISTER_EFFECT_EXT2(
 		inPtr,
 		inPluginDataCallBackPtr,
-		"Auto-Shake",     
-		"DKT Auto-Shake",   
-		"DKT Effects",    
-		AE_RESERVED_INFO,   
-		"EffectMain",      
-		"https://www.adobe.com");   
+		"Auto-Shake",
+		"DKT Auto-Shake",
+		"DKT Effects",
+		AE_RESERVED_INFO,
+		"EffectMain",
+		"https://www.adobe.com");
 
 	return result;
 }

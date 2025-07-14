@@ -136,7 +136,11 @@ struct ThreadRenderData {
     PF_FpLong accumulated_phase;
     bool accumulated_phase_initialized;
     bool has_frequency_keyframes;
+    int buffer_expand_x;
+    int buffer_expand_y;
 };
+
+
 
 
 
